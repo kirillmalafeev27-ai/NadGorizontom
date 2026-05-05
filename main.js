@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { pickQuestion } from './questions.js';
 
 // ====================================================================
@@ -118,6 +119,7 @@ const STATE = {
 // CITY LOAD
 // ====================================================================
 const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);
 const loadingBar = document.getElementById('loading-bar');
 const loadingEl  = document.getElementById('loading');
 
