@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glass Bridge — Nad Gorizontom</title>
+<link rel="stylesheet" href="styles.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Загружаем ночной мегаполис…</div>
+  <div class="loading-progress"><div id="loading-bar"></div></div>
+</div>
+
+<canvas id="scene"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="hud-top">
+    <div id="progress">
+      <span class="label">Шаг</span>
+      <span id="step-number">0</span>
+      <span class="sep">/</span>
+      <span id="step-total">12</span>
+    </div>
+    <div id="streak">
+      <span class="label">Высота</span>
+      <span id="altitude">— м</span>
+    </div>
+  </div>
+
+  <div id="quiz" class="hidden">
+    <div id="timer-bar"><div id="timer-fill"></div></div>
+    <div id="timer-label">7.0</div>
+    <div id="question"></div>
+    <div id="options"></div>
+    <div id="hint">Стекло под ногами уже трещит. Выбирай.</div>
+  </div>
+</div>
+
+<div id="gameover" class="hidden">
+  <div class="card">
+    <h1 id="endtitle">Ты упал</h1>
+    <p id="endtext">Стекло не выдержало. Город принял тебя.</p>
+    <button id="restart">Попробовать снова</button>
+  </div>
+</div>
+
+<div id="intro" class="hidden">
+  <div class="card">
+    <h1>Über den Wolken</h1>
+    <p>
+      Ты стоишь на крыше небоскреба. Впереди — стеклянный мост над ночным городом.
+      Часть панелей выдержит. Часть рассыпется под ногами.
+    </p>
+    <p class="rules">
+      На каждом шаге появляется задание по немецкому. Правильный ответ — шаг вперед.
+      Ошибка — остаешься на месте, но стекло продолжает трещать. На каждый шаг — <b>7 секунд</b>.
+      Опоздаешь — летишь вниз.
+    </p>
+    <button id="start-btn">Шагнуть на мост</button>
+  </div>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
