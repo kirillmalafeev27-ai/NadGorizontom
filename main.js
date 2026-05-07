@@ -1040,7 +1040,7 @@ function startQuestion() {
   timerFill.style.transform = 'scaleX(1)';
   timerFill.classList.remove('warn', 'crit');
   timerLabel.textContent = QUESTION_TIME.toFixed(1);
-  stepNumber.textContent = String(Math.min(STATE.step, BRIDGE_ROWS));
+  stepNumber.textContent = String(Math.min(STATE.step + 1, BRIDGE_ROWS));
   quizEl.classList.remove('hidden');
 }
 
@@ -1133,6 +1133,16 @@ function updateGame(t) {
 
       if (STATE.step > BRIDGE_ROWS) {
         onWin();
+      } else if (STATE.step === BRIDGE_ROWS) {
+        // last bridge tile reached — walk off to the target rooftop, no extra question
+        setTimeout(() => {
+          if (!STATE.active || STATE.falling || STATE.won) return;
+          STATE.moving = true;
+          STATE.moveStart = performance.now();
+          STATE.moveFrom.copy(STATE.player.pos);
+          STATE.step += 1;
+          STATE.moveTo.copy(stepWorldPosition(STATE.step));
+        }, 380);
       } else {
         startQuestion();
       }
@@ -1173,7 +1183,7 @@ function onWin() {
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 
   endTitle.textContent = 'Du hast es geschafft!';
-  endText.textContent = 'Ты прошёл стеклянный мост и не упал. Город остался внизу.';
+  endText.textContent = 'Семь шагов позади. Стекло осталось целым, город — внизу.';
   gameoverEl.classList.remove('hidden');
 }
 
@@ -1186,9 +1196,9 @@ function triggerFall() {
   quizEl.classList.add('hidden');
   STATE.fallStart = performance.now();
   STATE.fallVel.set(
-    (Math.random() - 0.5) * 0.3,
-    -1.0,
-    (Math.random() - 0.5) * 0.3,
+    (Math.random() - 0.5) * 0.4,
+    -2.4,
+    (Math.random() - 0.5) * 0.4,
   );
 
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
@@ -1211,7 +1221,9 @@ function animate() {
 
   for (const a of STATE.aviationLights) {
     const v = (Math.sin(t * 0.0025 + a.phase) + 1) * 0.5;
-    const intensity = a.white ? (v > 0.95 ? 1.5 : 0.05) : 0.2 + v * 0.8;
+    const intensity = a.white
+      ? 0.08 + Math.pow(v, 6) * 1.35
+      : 0.2 + v * 0.8;
     a.light.intensity = intensity * 0.7;
     if (a.white) {
       a.bulb.material.color.setRGB(intensity, intensity, intensity);

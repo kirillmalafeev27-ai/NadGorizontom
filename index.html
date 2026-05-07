@@ -17,7 +17,7 @@
 window.__gameBooted = false;
 window.__loadingWatchdog = window.setTimeout(function () {
   var text = document.querySelector('.loading-text');
-  if (text) text.textContent = 'Загрузка заняла слишком много времени. Пробуем облегчённый город...';
+  if (text) text.textContent = 'Город медлит. Включаем резервные огни...';
 }, 6000);
 window.__bootWatchdog = window.setTimeout(function () {
   if (window.__gameBooted) return;
@@ -63,7 +63,7 @@ window.addEventListener('error', function (event) {
     <div id="timer-label">7.0</div>
     <div id="question"></div>
     <div id="options"></div>
-    <div id="hint">Правильный ответ делает шаг по мосту. Ошибка оставляет тебя на месте.</div>
+    <div id="hint">Стекло слышит каждый ответ — и помнит каждую ошибку</div>
   </div>
 </div>
 
@@ -79,12 +79,13 @@ window.addEventListener('error', function (event) {
   <div class="card">
     <h1>Über den Wolken</h1>
     <p>
-      Ты стоишь на крыше небоскреба. Впереди - стеклянный мост 3x7 над ночным городом.
-      В каждом ряду только одна панель выдержит, остальные рассыпятся под ногами.
+      Ты стоишь на краю крыши. Впереди — стекло над ночным городом,
+      и от другой крыши тебя отделяют семь шагов.
     </p>
     <p class="rules">
-      Выбирай правильный ответ, чтобы сделать следующий шаг. <b>Мышь</b> - осмотреться.<br />
-      Безопасный путь змеится между рядами и меняется при каждом новом забеге.
+      На каждом шаге — короткий вопрос на немецком.
+      Точный ответ переносит дальше; ошибка или молчание — трещина в стекле под тобой.<br />
+      <b>Мышь</b> — оглядеться. <b>Клик по варианту</b> — ответ.
     </p>
     <button id="start-btn">Шагнуть на мост</button>
   </div>
