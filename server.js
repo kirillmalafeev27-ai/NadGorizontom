@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const DEFAULT_PORT = 3000;
 const ROOT = __dirname;
+const THREE_ROOT = path.join(ROOT, 'node_modules', 'three');
 
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -35,11 +36,33 @@ function safeResolve(root, requestPath) {
 
   if (!pathname.startsWith('/')) pathname = `/${pathname}`;
   if (pathname.includes('\\') || pathname.split('/').includes('..')) return null;
+  if (pathname === '/node_modules' || pathname.startsWith('/node_modules/')) return null;
 
   if (pathname === '/') pathname = '/index.html';
   const resolved = path.resolve(root, `.${pathname}`);
   const rootWithSep = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
   if (!resolved.startsWith(rootWithSep)) return null;
+  return resolved;
+}
+
+function resolveThreeVendor(requestPath) {
+  let pathname;
+  try {
+    pathname = decodeURIComponent((requestPath || '').split('?')[0].split('#')[0]);
+  } catch {
+    return null;
+  }
+
+  const prefix = '/vendor/three/';
+  if (!pathname.startsWith(prefix)) return null;
+  const relative = pathname.slice(prefix.length);
+  if (!relative || relative.includes('\\') || relative.split('/').includes('..')) {
+    return null;
+  }
+
+  const resolved = path.resolve(THREE_ROOT, relative);
+  const vendorRoot = THREE_ROOT.endsWith(path.sep) ? THREE_ROOT : `${THREE_ROOT}${path.sep}`;
+  if (!resolved.startsWith(vendorRoot)) return null;
   return resolved;
 }
 
@@ -65,7 +88,9 @@ function createServer(root = ROOT) {
       return;
     }
 
-    const filePath = safeResolve(root, req.url || '/');
+    const filePath =
+      resolveThreeVendor(req.url || '/') ||
+      safeResolve(root, req.url || '/');
     if (!filePath) {
       sendText(res, 403, 'forbidden');
       return;
@@ -103,4 +128,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { cacheControlFor, createServer, safeResolve };
+module.exports = { cacheControlFor, createServer, resolveThreeVendor, safeResolve };

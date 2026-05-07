@@ -3,6 +3,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { pickQuestion } from './questions.js';
 
+window.__gameBooted = true;
+
 // ====================================================================
 // CONSTANTS
 // ====================================================================
@@ -17,6 +19,7 @@ const PLATFORM_SIZE = 9.5;
 const MOUSE_SENS = 0.0022;
 const QUESTION_TIME = 7.0;
 const STEP_MOVE_MS = 520;
+const CITY_LOAD_TIMEOUT_MS = 8000;
 const FRAGILE_BREAK_MS = 480;
 const FALL_DURATION_MS = 2400;
 
@@ -150,24 +153,62 @@ loader.setMeshoptDecoder(MeshoptDecoder);
 
 const loadingBar = document.getElementById('loading-bar');
 const loadingEl = document.getElementById('loading');
+const loadingText = document.querySelector('.loading-text');
 let progressTimer = null;
+let cityLoadDone = false;
+
+function stopLoadingProgress() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+  if (window.__loadingWatchdog) {
+    clearTimeout(window.__loadingWatchdog);
+    window.__loadingWatchdog = null;
+  }
+  if (window.__bootWatchdog) {
+    clearTimeout(window.__bootWatchdog);
+    window.__bootWatchdog = null;
+  }
+}
+
+function finishCityLoad(cityRoot) {
+  if (cityLoadDone) return;
+  cityLoadDone = true;
+  stopLoadingProgress();
+
+  loadingBar.style.width = '100%';
+  STATE.cityRoot = cityRoot;
+  if (cityRoot) {
+    scene.add(STATE.cityRoot);
+  }
+
+  initStaticScene();
+  showIntro();
+  loadingEl.classList.add('hidden');
+}
+
+function useFallbackCity(reason) {
+  if (cityLoadDone) return;
+  console.warn('Using fallback city:', reason);
+  if (loadingText) {
+    loadingText.textContent = 'Загружаем облегчённый город...';
+  }
+  finishCityLoad(makeFallbackCity());
+}
+
+const cityLoadTimeout = setTimeout(() => {
+  useFallbackCity('GLB load timeout');
+}, CITY_LOAD_TIMEOUT_MS);
 
 loader.load(
   'la_night_2k.glb',
   (gltf) => {
-    if (progressTimer) {
-      clearInterval(progressTimer);
-      progressTimer = null;
-    }
-    loadingBar.style.width = '100%';
-
+    if (cityLoadDone) return;
+    clearTimeout(cityLoadTimeout);
     STATE.cityRoot = gltf.scene;
     fitCity();
-    scene.add(STATE.cityRoot);
-
-    initStaticScene();
-    showIntro();
-    loadingEl.classList.add('hidden');
+    finishCityLoad(STATE.cityRoot);
   },
   (xhr) => {
     if (xhr.lengthComputable && xhr.total > 0) {
@@ -185,18 +226,9 @@ loader.load(
     }
   },
   (err) => {
-    if (progressTimer) {
-      clearInterval(progressTimer);
-      progressTimer = null;
-    }
-
+    clearTimeout(cityLoadTimeout);
     console.error('GLB load failed', err);
-    STATE.cityRoot = makeFallbackCity();
-    scene.add(STATE.cityRoot);
-
-    initStaticScene();
-    showIntro();
-    loadingEl.classList.add('hidden');
+    useFallbackCity(err);
   },
 );
 

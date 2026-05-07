@@ -8,10 +8,22 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
   }
 }
+</script>
+<script>
+window.__gameBooted = false;
+window.__loadingWatchdog = window.setTimeout(function () {
+  var text = document.querySelector('.loading-text');
+  if (text) text.textContent = 'Загрузка заняла слишком много времени. Пробуем облегчённый город...';
+}, 6000);
+window.__bootWatchdog = window.setTimeout(function () {
+  if (window.__gameBooted) return;
+  var text = document.querySelector('.loading-text');
+  if (text) text.textContent = 'Не удалось загрузить игровой код. Проверь деплой и обнови страницу.';
+}, 14000);
 </script>
 </head>
 <body>
