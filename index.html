@@ -8,8 +8,8 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "/vendor/three/build/three.module.js",
-    "three/addons/": "/vendor/three/examples/jsm/"
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
   }
 }
 </script>
@@ -21,9 +21,17 @@ window.__loadingWatchdog = window.setTimeout(function () {
 }, 6000);
 window.__bootWatchdog = window.setTimeout(function () {
   if (window.__gameBooted) return;
-  var text = document.querySelector('.loading-text');
-  if (text) text.textContent = 'Не удалось загрузить игровой код. Проверь деплой и обнови страницу.';
+  var loading = document.getElementById('loading');
+  if (loading) {
+    var text = loading.querySelector('.loading-text');
+    if (text) text.textContent = 'Не удалось загрузить игровой код. Обнови страницу.';
+  }
 }, 14000);
+window.addEventListener('error', function (event) {
+  if (window.__gameBooted) return;
+  var text = document.querySelector('.loading-text');
+  if (text) text.textContent = 'Ошибка загрузки: ' + (event.message || 'неизвестно') + '. Обнови страницу.';
+});
 </script>
 </head>
 <body>

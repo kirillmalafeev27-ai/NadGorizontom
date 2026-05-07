@@ -183,9 +183,17 @@ function finishCityLoad(cityRoot) {
     scene.add(STATE.cityRoot);
   }
 
-  initStaticScene();
-  showIntro();
-  loadingEl.classList.add('hidden');
+  try {
+    initStaticScene();
+    showIntro();
+    loadingEl.classList.add('hidden');
+  } catch (err) {
+    console.error('Scene init failed', err);
+    if (loadingText) {
+      loadingText.textContent =
+        'Не удалось построить сцену. Попробуй обновить страницу.';
+    }
+  }
 }
 
 function useFallbackCity(reason) {
