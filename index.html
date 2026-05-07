@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Glass Bridge — Nad Gorizontom</title>
+<title>Glass Bridge - Nad Gorizontom</title>
 <link rel="stylesheet" href="styles.css" />
 <script type="importmap">
 {
@@ -17,19 +17,20 @@
 <body>
 <div id="loading">
   <div class="spinner"></div>
-  <div class="loading-text">Загружаем ночной мегаполис…</div>
+  <div class="loading-text">Загружаем ночной мегаполис...</div>
   <div class="loading-progress"><div id="loading-bar"></div></div>
 </div>
 
 <canvas id="scene"></canvas>
+<div id="crosshair"></div>
 
 <div id="hud" class="hidden">
   <div id="hud-top">
     <div id="progress">
-      <span class="label">Шаг</span>
+      <span class="label">Ряд</span>
       <span id="step-number">0</span>
       <span class="sep">/</span>
-      <span id="step-total">12</span>
+      <span id="step-total">7</span>
     </div>
     <div id="streak">
       <span class="label">Высота</span>
@@ -42,7 +43,7 @@
     <div id="timer-label">7.0</div>
     <div id="question"></div>
     <div id="options"></div>
-    <div id="hint">Стекло под ногами уже трещит. Выбирай.</div>
+    <div id="hint">Правильный ответ делает шаг по мосту. Ошибка оставляет тебя на месте.</div>
   </div>
 </div>
 
@@ -58,13 +59,12 @@
   <div class="card">
     <h1>Über den Wolken</h1>
     <p>
-      Ты стоишь на крыше небоскреба. Впереди — стеклянный мост над ночным городом.
-      Часть панелей выдержит. Часть рассыпется под ногами.
+      Ты стоишь на крыше небоскреба. Впереди - стеклянный мост 3x7 над ночным городом.
+      В каждом ряду только одна панель выдержит, остальные рассыпятся под ногами.
     </p>
     <p class="rules">
-      На каждом шаге появляется задание по немецкому. Правильный ответ — шаг вперед.
-      Ошибка — остаешься на месте, но стекло продолжает трещать. На каждый шаг — <b>7 секунд</b>.
-      Опоздаешь — летишь вниз.
+      Выбирай правильный ответ, чтобы сделать следующий шаг. <b>Мышь</b> - осмотреться.<br />
+      Безопасный путь змеится между рядами и меняется при каждом новом забеге.
     </p>
     <button id="start-btn">Шагнуть на мост</button>
   </div>

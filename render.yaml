@@ -1,20 +1,13 @@
 services:
   - type: web
     name: nadgorizontom
-    runtime: static
-    buildCommand: ""
-    staticPublishPath: ./
-    pullRequestPreviewsEnabled: false
-    headers:
-      - path: /*.glb
-        name: Cache-Control
-        value: public, max-age=31536000, immutable
-      - path: /*.js
-        name: Cache-Control
-        value: public, max-age=3600
-      - path: /*.css
-        name: Cache-Control
-        value: public, max-age=3600
-      - path: /*
-        name: X-Frame-Options
-        value: SAMEORIGIN
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
