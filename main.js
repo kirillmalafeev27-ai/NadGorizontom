@@ -19,7 +19,8 @@ const PLATFORM_SIZE = 9.5;
 const MOUSE_SENS = 0.0022;
 const QUESTION_TIME = 7.0;
 const STEP_MOVE_MS = 520;
-const CITY_LOAD_TIMEOUT_MS = 8000;
+const CITY_LOAD_TIMEOUT_MS = 14000;
+const CITY_DOWNLOAD_STALL_MS = 9000;
 const FRAGILE_BREAK_MS = 480;
 const FALL_DURATION_MS = 2400;
 
@@ -155,12 +156,23 @@ const loadingBar = document.getElementById('loading-bar');
 const loadingEl = document.getElementById('loading');
 const loadingText = document.querySelector('.loading-text');
 let progressTimer = null;
+let stallTimer = null;
 let cityLoadDone = false;
+let downloadFinished = false;
+let lastProgressAt = performance.now();
+
+function setLoadingText(msg) {
+  if (loadingText) loadingText.textContent = msg;
+}
 
 function stopLoadingProgress() {
   if (progressTimer) {
     clearInterval(progressTimer);
     progressTimer = null;
+  }
+  if (stallTimer) {
+    clearInterval(stallTimer);
+    stallTimer = null;
   }
   if (window.__loadingWatchdog) {
     clearTimeout(window.__loadingWatchdog);
@@ -189,25 +201,33 @@ function finishCityLoad(cityRoot) {
     loadingEl.classList.add('hidden');
   } catch (err) {
     console.error('Scene init failed', err);
-    if (loadingText) {
-      loadingText.textContent =
-        'Не удалось построить сцену. Попробуй обновить страницу.';
-    }
+    setLoadingText('Не удалось построить сцену. Попробуй обновить страницу.');
   }
 }
 
 function useFallbackCity(reason) {
   if (cityLoadDone) return;
   console.warn('Using fallback city:', reason);
-  if (loadingText) {
-    loadingText.textContent = 'Загружаем облегчённый город...';
+  setLoadingText('Город медлит. Включаем резервные огни...');
+  try {
+    finishCityLoad(makeFallbackCity());
+  } catch (err) {
+    console.error('Fallback city build failed', err);
+    setLoadingText('Не удалось построить сцену. Обнови страницу.');
   }
-  finishCityLoad(makeFallbackCity());
 }
 
 const cityLoadTimeout = setTimeout(() => {
   useFallbackCity('GLB load timeout');
 }, CITY_LOAD_TIMEOUT_MS);
+
+stallTimer = setInterval(() => {
+  if (cityLoadDone || downloadFinished) return;
+  if (performance.now() - lastProgressAt > CITY_DOWNLOAD_STALL_MS) {
+    clearTimeout(cityLoadTimeout);
+    useFallbackCity('download stalled');
+  }
+}, 1000);
 
 loader.load(
   'la_night_2k.glb',
@@ -215,12 +235,25 @@ loader.load(
     if (cityLoadDone) return;
     clearTimeout(cityLoadTimeout);
     STATE.cityRoot = gltf.scene;
-    fitCity();
+    try {
+      fitCity();
+    } catch (err) {
+      console.error('fitCity failed', err);
+      useFallbackCity(err);
+      return;
+    }
     finishCityLoad(STATE.cityRoot);
   },
   (xhr) => {
+    lastProgressAt = performance.now();
+
     if (xhr.lengthComputable && xhr.total > 0) {
-      loadingBar.style.width = `${(xhr.loaded / xhr.total) * 100}%`;
+      const pct = (xhr.loaded / xhr.total) * 100;
+      loadingBar.style.width = `${pct}%`;
+      if (xhr.loaded >= xhr.total && !downloadFinished) {
+        downloadFinished = true;
+        setLoadingText('Раскладываем стекло и огни...');
+      }
       return;
     }
 
@@ -228,7 +261,7 @@ loader.load(
       const startedAt = performance.now();
       progressTimer = setInterval(() => {
         const elapsed = (performance.now() - startedAt) / 1000;
-        const pct = Math.min(92, 100 * (1 - Math.exp(-elapsed / 18)));
+        const pct = Math.min(92, 100 * (1 - Math.exp(-elapsed / 14)));
         loadingBar.style.width = `${pct}%`;
       }, 200);
     }

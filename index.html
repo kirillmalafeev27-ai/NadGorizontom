@@ -8,8 +8,8 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
   }
 }
 </script>
@@ -18,15 +18,15 @@ window.__gameBooted = false;
 window.__loadingWatchdog = window.setTimeout(function () {
   var text = document.querySelector('.loading-text');
   if (text) text.textContent = 'Город медлит. Включаем резервные огни...';
-}, 6000);
+}, 7000);
 window.__bootWatchdog = window.setTimeout(function () {
   if (window.__gameBooted) return;
   var loading = document.getElementById('loading');
   if (loading) {
     var text = loading.querySelector('.loading-text');
-    if (text) text.textContent = 'Не удалось загрузить игровой код. Обнови страницу.';
+    if (text) text.textContent = 'Сцена не отвечает. Обнови страницу.';
   }
-}, 14000);
+}, 18000);
 window.addEventListener('error', function (event) {
   if (window.__gameBooted) return;
   var text = document.querySelector('.loading-text');
