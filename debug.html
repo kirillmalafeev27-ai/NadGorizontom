@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Диагностика — Nad Gorizontom</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0a0e14;
+    color: #c9d1d9;
+    font: 13px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    margin: 0;
+    padding: 24px;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  h1 { font-size: 18px; color: #58a6ff; margin: 0 0 4px; letter-spacing: 0.04em; font-weight: 600; }
+  h2 {
+    font-size: 11px; color: #8b949e; text-transform: uppercase;
+    letter-spacing: 0.22em; margin: 28px 0 8px; font-weight: 600;
+  }
+  .hint { color: #6e7681; font-size: 12px; margin-bottom: 6px; }
+  .hint a { color: #58a6ff; text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
+  .row {
+    display: grid;
+    grid-template-columns: 240px 80px 1fr;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: 1px dashed #1a2230;
+    align-items: baseline;
+  }
+  .row:last-child { border-bottom: none; }
+  .key { color: #79c0ff; }
+  .val { color: #c9d1d9; word-break: break-all; }
+  .badge {
+    display: inline-block;
+    padding: 1px 9px;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-align: center;
+    min-width: 56px;
+  }
+  .ok { background: #173d29; color: #56d364; }
+  .warn { background: #4a3416; color: #e3b341; }
+  .err { background: #4a1c1f; color: #f85149; }
+  .pending { background: #1f2630; color: #8b949e; }
+  #log {
+    background: #050810;
+    border: 1px solid #1a2230;
+    border-radius: 4px;
+    padding: 10px 12px;
+    max-height: 360px;
+    overflow-y: auto;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #log .entry { padding: 1px 0; }
+  #log .ts { color: #6e7681; margin-right: 10px; }
+  #log .l-log { color: #c9d1d9; }
+  #log .l-info { color: #79c0ff; }
+  #log .l-warn { color: #e3b341; }
+  #log .l-error { color: #f85149; }
+  .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: #1f2933;
+    border: 1px solid #2d3641;
+    color: #c9d1d9;
+    padding: 7px 16px;
+    font: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+  }
+  button:hover { background: #2d3641; border-color: #3d4651; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .summary { margin-top: 8px; color: #8b949e; font-size: 12px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<h1>Диагностика загрузки</h1>
+<div class="hint">
+  Эта страница пробует те же модули, что и игра, и пишет всё в лог.
+  <a href="/">← вернуться в игру</a>
+</div>
+
+<h2>Среда браузера</h2>
+<div id="env"></div>
+
+<h2>Сеть</h2>
+<div id="net"></div>
+
+<h2>three.js</h2>
+<div id="three"></div>
+
+<h2>Модель la_night_2k.glb</h2>
+<div id="model"></div>
+
+<h2>Лог</h2>
+<div id="log"></div>
+<div class="actions">
+  <button id="rerun">Повторить</button>
+  <button id="copy">Скопировать лог</button>
+  <button id="dl">Скачать .txt</button>
+</div>
+<div class="summary" id="summary"></div>
+
+<script type="module">
+const $env = document.getElementById('env');
+const $net = document.getElementById('net');
+const $three = document.getElementById('three');
+const $model = document.getElementById('model');
+const $log = document.getElementById('log');
+const $summary = document.getElementById('summary');
+const $rerun = document.getElementById('rerun');
+const $dl = document.getElementById('dl');
+const $copy = document.getElementById('copy');
+
+let events = [];
+
+function ts() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+function fmt(a) {
+  if (a instanceof Error) return (a.stack || a.message || String(a));
+  if (a === null) return 'null';
+  if (a === undefined) return 'undefined';
+  if (typeof a === 'object') {
+    try { return JSON.stringify(a); } catch { return String(a); }
+  }
+  return String(a);
+}
+function rec(level, ...args) {
+  events.push({ ts: ts(), level, msg: args.map(fmt).join(' ') });
+  renderLog();
+}
+
+const orig = {
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+};
+console.log = (...a) => { rec('log', ...a); orig.log(...a); };
+console.info = (...a) => { rec('info', ...a); orig.info(...a); };
+console.warn = (...a) => { rec('warn', ...a); orig.warn(...a); };
+console.error = (...a) => { rec('error', ...a); orig.error(...a); };
+
+window.addEventListener('error', (e) => {
+  rec('error', `window.error: ${e.message} @ ${e.filename || '?'}:${e.lineno || '?'}:${e.colno || '?'}`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  rec('error', `unhandledrejection: ${r && (r.stack || r.message) || fmt(r)}`);
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function renderLog() {
+  $log.innerHTML = events.map((e) =>
+    `<div class="entry l-${e.level}"><span class="ts">${e.ts}</span>${escapeHtml(e.msg)}</div>`
+  ).join('');
+  $log.scrollTop = $log.scrollHeight;
+}
+
+function row(parent, key, status, val) {
+  const div = document.createElement('div');
+  div.className = 'row';
+  div.innerHTML =
+    `<div class="key">${escapeHtml(key)}</div>` +
+    `<div><span class="badge ${status}">${labelFor(status)}</span></div>` +
+    `<div class="val">${escapeHtml(val || '')}</div>`;
+  parent.appendChild(div);
+  return div;
+}
+function update(rowEl, status, val) {
+  const badge = rowEl.querySelector('.badge');
+  badge.className = `badge ${status}`;
+  badge.textContent = labelFor(status);
+  rowEl.querySelector('.val').textContent = val || '';
+}
+function labelFor(s) {
+  return ({ ok: 'OK', warn: 'WARN', err: 'FAIL', pending: '...' })[s] || s;
+}
+
+async function runEnv() {
+  $env.innerHTML = '';
+  row($env, 'User-Agent', 'ok', navigator.userAgent);
+  row($env, 'Origin', 'ok', location.origin);
+
+  const importMapOk =
+    typeof HTMLScriptElement !== 'undefined' &&
+    typeof HTMLScriptElement.supports === 'function' &&
+    HTMLScriptElement.supports('importmap');
+  row($env, 'Import maps', importMapOk ? 'ok' : 'warn',
+    importMapOk ? 'supported' : 'не подтверждено через HTMLScriptElement.supports');
+
+  row($env, 'WebAssembly', typeof WebAssembly === 'object' ? 'ok' : 'err',
+    typeof WebAssembly === 'object' ? 'available' : 'нет — meshopt не сработает');
+
+  let gl = null;
+  try {
+    gl = document.createElement('canvas').getContext('webgl2');
+  } catch (e) {
+    console.warn('WebGL2 init failed', e);
+  }
+  if (gl) {
+    row($env, 'WebGL2', 'ok', gl.getParameter(gl.VERSION));
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    row($env, 'GPU', 'ok', ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '(скрыт браузером)');
+  } else {
+    row($env, 'WebGL2', 'err', 'нет — three.js не сможет рендерить');
+  }
+
+  row($env, 'createImageBitmap',
+    typeof createImageBitmap === 'function' ? 'ok' : 'warn',
+    typeof createImageBitmap === 'function' ? 'available' : 'нет — декод текстур может тормозить');
+
+  const webpRow = row($env, 'WebP decode', 'pending', '');
+  const webp = await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = img.onerror = () => resolve(img.height === 1);
+    img.src = 'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
+    setTimeout(() => resolve(false), 2500);
+  });
+  update(webpRow, webp ? 'ok' : 'err',
+    webp ? 'supported' : 'нет — модель использует EXT_texture_webp (обязательное)');
+
+  if (performance.memory) {
+    const m = performance.memory;
+    row($env, 'JS heap', 'ok',
+      `used ${(m.usedJSHeapSize / 1048576).toFixed(1)} / limit ${(m.jsHeapSizeLimit / 1048576).toFixed(0)} MB`);
+  }
+  row($env, 'devicePixelRatio', 'ok', String(window.devicePixelRatio));
+  row($env, 'Online', navigator.onLine ? 'ok' : 'err', navigator.onLine ? 'true' : 'false');
+}
+
+async function checkUrl(url, label, parent) {
+  const r = row(parent, label, 'pending', url);
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+    let total = 0;
+    if (res.body && res.body.getReader) {
+      const reader = res.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+      }
+    } else {
+      total = (await res.arrayBuffer()).byteLength;
+    }
+    const dt = (performance.now() - t0).toFixed(0);
+    const ct = res.headers.get('content-type') || '?';
+    const status = res.ok ? 'ok' : 'err';
+    update(r, status, `${res.status} ${res.statusText} • ${total.toLocaleString()} B • ${dt} ms • ${ct}`);
+    if (!res.ok) console.error(`${label}: HTTP ${res.status}`);
+  } catch (e) {
+    update(r, 'err', e.message || String(e));
+    console.error(`${label} fetch failed:`, e);
+  }
+}
+
+async function runNet() {
+  $net.innerHTML = '';
+  await Promise.all([
+    checkUrl('/healthz', 'GET /healthz', $net),
+    checkUrl('/vendor/three/build/three.module.js', 'three.module.js', $net),
+    checkUrl('/vendor/three/examples/jsm/loaders/GLTFLoader.js', 'GLTFLoader.js', $net),
+    checkUrl('/vendor/three/examples/jsm/libs/meshopt_decoder.module.js', 'meshopt_decoder.js', $net),
+    checkUrl('/la_night_2k.glb', 'la_night_2k.glb', $net),
+    checkUrl('/main.js', 'main.js', $net),
+    checkUrl('/styles.css', 'styles.css', $net),
+    checkUrl('/questions.js', 'questions.js', $net),
+  ]);
+}
+
+async function runThree() {
+  $three.innerHTML = '';
+  const r1 = row($three, 'import "three"', 'pending', '');
+  const r2 = row($three, 'import GLTFLoader', 'pending', '');
+  const r3 = row($three, 'import MeshoptDecoder', 'pending', '');
+  const r4 = row($three, 'MeshoptDecoder.ready (WASM)', 'pending', '');
+
+  let THREE = null, GLTFLoader = null, MeshoptDecoder = null;
+
+  const t0 = performance.now();
+  try {
+    THREE = await import('three');
+    update(r1, 'ok', `revision ${THREE.REVISION} in ${(performance.now() - t0).toFixed(0)} ms`);
+  } catch (e) {
+    update(r1, 'err', e.message || String(e));
+    console.error('import three failed:', e);
+    return null;
+  }
+
+  try {
+    const t = performance.now();
+    const m = await import('three/addons/loaders/GLTFLoader.js');
+    GLTFLoader = m.GLTFLoader;
+    update(r2, GLTFLoader ? 'ok' : 'err',
+      GLTFLoader ? `loaded in ${(performance.now() - t).toFixed(0)} ms` : 'export GLTFLoader не найден');
+  } catch (e) {
+    update(r2, 'err', e.message || String(e));
+    console.error('import GLTFLoader failed:', e);
+  }
+
+  try {
+    const t = performance.now();
+    const m = await import('three/addons/libs/meshopt_decoder.module.js');
+    MeshoptDecoder = m.MeshoptDecoder;
+    update(r3, MeshoptDecoder ? 'ok' : 'err',
+      MeshoptDecoder
+        ? `loaded in ${(performance.now() - t).toFixed(0)} ms • supported=${MeshoptDecoder.supported}`
+        : 'export MeshoptDecoder не найден');
+  } catch (e) {
+    update(r3, 'err', e.message || String(e));
+    console.error('import MeshoptDecoder failed:', e);
+  }
+
+  if (MeshoptDecoder && MeshoptDecoder.ready) {
+    const t = performance.now();
+    try {
+      await Promise.race([
+        MeshoptDecoder.ready,
+        new Promise((_, j) => setTimeout(() => j(new Error('timeout 6000ms')), 6000)),
+      ]);
+      update(r4, 'ok', `WASM готов за ${(performance.now() - t).toFixed(0)} ms`);
+    } catch (e) {
+      update(r4, 'err', e.message || String(e));
+      console.error('MeshoptDecoder.ready failed:', e);
+    }
+  } else {
+    update(r4, 'err', 'MeshoptDecoder не загружен');
+  }
+
+  return { THREE, GLTFLoader, MeshoptDecoder };
+}
+
+async function runModel(deps) {
+  $model.innerHTML = '';
+  const rDl = row($model, 'Скачивание', 'pending', '');
+  const rHdr = row($model, 'GLB-заголовок', 'pending', '');
+  const rJson = row($model, 'JSON-чанк', 'pending', '');
+  const rExt = row($model, 'Расширения', 'pending', '');
+  const rParse = row($model, 'GLTFLoader.parseAsync', 'pending', '');
+  const rScene = row($model, 'Сцена после разбора', 'pending', '');
+
+  let buf;
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/la_night_2k.glb', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    buf = await res.arrayBuffer();
+    update(rDl, 'ok', `${buf.byteLength.toLocaleString()} B за ${(performance.now() - t0).toFixed(0)} ms`);
+  } catch (e) {
+    update(rDl, 'err', e.message || String(e));
+    console.error('GLB download failed:', e);
+    return;
+  }
+
+  let json;
+  try {
+    const dv = new DataView(buf);
+    const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
+    const version = dv.getUint32(4, true);
+    const total = dv.getUint32(8, true);
+    if (magic !== 'glTF') throw new Error(`bad magic "${magic}"`);
+    if (total !== buf.byteLength) {
+      update(rHdr, 'warn', `magic=${magic} ver=${version} declaredLen=${total} actualLen=${buf.byteLength} (несовпадение размеров)`);
+    } else {
+      update(rHdr, 'ok', `magic=${magic} ver=${version} bytes=${total.toLocaleString()}`);
+    }
+
+    const jsonLen = dv.getUint32(12, true);
+    const jsonChunkType = String.fromCharCode(dv.getUint8(16), dv.getUint8(17), dv.getUint8(18), dv.getUint8(19));
+    if (jsonChunkType !== 'JSON') throw new Error(`first chunk type "${jsonChunkType}" != "JSON"`);
+    const jsonStr = new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen));
+    json = JSON.parse(jsonStr);
+    update(rJson, 'ok',
+      `len=${jsonLen} • meshes=${json.meshes ? json.meshes.length : 0} • materials=${json.materials ? json.materials.length : 0} • textures=${json.textures ? json.textures.length : 0} • images=${json.images ? json.images.length : 0}`);
+
+    const used = (json.extensionsUsed || []).join(', ') || '(нет)';
+    const req = (json.extensionsRequired || []).join(', ') || '(нет)';
+    update(rExt, 'ok', `used: ${used} | required: ${req}`);
+  } catch (e) {
+    update(rJson, 'err', e.message || String(e));
+    console.error('GLB header parse failed:', e);
+    return;
+  }
+
+  if (!deps || !deps.GLTFLoader || !deps.MeshoptDecoder) {
+    update(rParse, 'err', 'three.js или MeshoptDecoder не загружены — пропускаем разбор');
+    return;
+  }
+
+  const t1 = performance.now();
+  let gltf;
+  try {
+    const loader = new deps.GLTFLoader();
+    loader.setMeshoptDecoder(deps.MeshoptDecoder);
+    gltf = await Promise.race([
+      loader.parseAsync(buf, ''),
+      new Promise((_, j) => setTimeout(() => j(new Error('parseAsync timeout 25s')), 25000)),
+    ]);
+    update(rParse, 'ok', `разбор за ${(performance.now() - t1).toFixed(0)} ms`);
+  } catch (e) {
+    update(rParse, 'err', e.message || String(e));
+    console.error('GLTFLoader.parseAsync failed:', e);
+    return;
+  }
+
+  let meshes = 0, mats = new Set(), tex = new Set(), tris = 0;
+  gltf.scene.traverse((o) => {
+    if (o.isMesh) {
+      meshes++;
+      const idx = o.geometry?.index;
+      const pos = o.geometry?.attributes?.position;
+      if (idx) tris += idx.count / 3;
+      else if (pos) tris += pos.count / 3;
+      const mm = Array.isArray(o.material) ? o.material : [o.material];
+      mm.forEach((m) => {
+        if (!m) return;
+        mats.add(m.uuid);
+        ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap'].forEach((k) => {
+          if (m[k]) tex.add(m[k].uuid);
+        });
+      });
+    }
+  });
+  update(rScene, 'ok',
+    `meshes=${meshes} • triangles≈${Math.round(tris).toLocaleString()} • materials=${mats.size} • textures=${tex.size}`);
+}
+
+function summarize() {
+  const totalBadges = document.querySelectorAll('.badge');
+  let ok = 0, warn = 0, err = 0;
+  totalBadges.forEach((b) => {
+    if (b.classList.contains('ok')) ok++;
+    else if (b.classList.contains('warn')) warn++;
+    else if (b.classList.contains('err')) err++;
+  });
+  $summary.textContent = `Итого: ${ok} OK • ${warn} WARN • ${err} FAIL`;
+  $summary.style.color = err ? '#f85149' : warn ? '#e3b341' : '#56d364';
+}
+
+async function runAll() {
+  $rerun.disabled = true;
+  events = [];
+  renderLog();
+  $summary.textContent = '';
+  console.info('--- начало диагностики ---');
+
+  try {
+    await runEnv();
+  } catch (e) { console.error('runEnv crashed:', e); }
+  try {
+    await runNet();
+  } catch (e) { console.error('runNet crashed:', e); }
+  let deps = null;
+  try {
+    deps = await runThree();
+  } catch (e) { console.error('runThree crashed:', e); }
+  try {
+    await runModel(deps);
+  } catch (e) { console.error('runModel crashed:', e); }
+
+  console.info('--- диагностика завершена ---');
+  summarize();
+  $rerun.disabled = false;
+}
+
+function fullText() {
+  return events.map((e) => `[${e.ts}] [${e.level.toUpperCase()}] ${e.msg}`).join('\n');
+}
+
+$rerun.addEventListener('click', runAll);
+$dl.addEventListener('click', () => {
+  const blob = new Blob([fullText()], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nadgorizontom-diag-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+});
+$copy.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(fullText());
+    const orig = $copy.textContent;
+    $copy.textContent = 'Скопировано';
+    setTimeout(() => { $copy.textContent = orig; }, 1500);
+  } catch (e) {
+    $copy.textContent = 'Не удалось';
+  }
+});
+
+runAll();
+</script>
+</body>
+</html>

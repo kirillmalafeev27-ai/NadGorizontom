@@ -76,6 +76,19 @@ canvas#scene {
   background: linear-gradient(90deg, #6ea8ff, #a3d4ff);
   transition: width 0.2s ease;
 }
+.loading-debug {
+  position: absolute;
+  bottom: 18px;
+  right: 22px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #4a5b78;
+  text-decoration: none;
+  opacity: 0.55;
+  transition: opacity 0.2s, color 0.2s;
+}
+.loading-debug:hover { opacity: 1; color: #8aa0c2; }
 
 /* ---------- HUD ---------- */
 #hud {
