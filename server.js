@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const zlib = require('node:zlib');
 
 const DEFAULT_PORT = 3000;
 const ROOT = __dirname;
@@ -17,6 +18,13 @@ const CONTENT_TYPES = {
   '.svg': 'image/svg+xml',
   '.webp': 'image/webp',
 };
+
+const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.json', '.svg', '.map']);
+
+function acceptsGzip(req) {
+  const h = req.headers['accept-encoding'];
+  return typeof h === 'string' && h.split(',').some((p) => p.trim().toLowerCase().startsWith('gzip'));
+}
 
 function cacheControlFor(filePath) {
   const ext = path.extname(filePath).toLowerCase();
@@ -103,20 +111,33 @@ function createServer(root = ROOT) {
       }
 
       const ext = path.extname(filePath).toLowerCase();
-      res.writeHead(200, {
+      const useGzip = COMPRESSIBLE.has(ext) && acceptsGzip(req);
+
+      const headers = {
         'Cache-Control': cacheControlFor(filePath),
-        'Content-Length': stats.size,
         'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
-      });
+      };
+      if (useGzip) {
+        headers['Content-Encoding'] = 'gzip';
+        headers['Vary'] = 'Accept-Encoding';
+      } else {
+        headers['Content-Length'] = stats.size;
+      }
+      res.writeHead(200, headers);
 
       if (req.method === 'HEAD') {
         res.end();
         return;
       }
 
-      fs.createReadStream(filePath).pipe(res);
+      const source = fs.createReadStream(filePath);
+      if (useGzip) {
+        source.pipe(zlib.createGzip({ level: 6 })).pipe(res);
+      } else {
+        source.pipe(res);
+      }
     });
   });
 }

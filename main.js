@@ -19,10 +19,10 @@ const PLATFORM_SIZE = 9.5;
 const MOUSE_SENS = 0.0022;
 const QUESTION_TIME = 7.0;
 const STEP_MOVE_MS = 520;
-const CITY_LOAD_TIMEOUT_MS = 14000;
-const CITY_DOWNLOAD_STALL_MS = 9000;
 const FRAGILE_BREAK_MS = 480;
 const FALL_DURATION_MS = 2400;
+const CITY_TARGET_TOP_Y = 60;
+const PLATFORM_Y = 70;
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -149,31 +149,15 @@ const STATE = {
 // ====================================================================
 // CITY LOAD
 // ====================================================================
-const loader = new GLTFLoader();
-loader.setMeshoptDecoder(MeshoptDecoder);
-
 const loadingBar = document.getElementById('loading-bar');
 const loadingEl = document.getElementById('loading');
 const loadingText = document.querySelector('.loading-text');
-let progressTimer = null;
-let stallTimer = null;
-let cityLoadDone = false;
-let downloadFinished = false;
-let lastProgressAt = performance.now();
 
 function setLoadingText(msg) {
   if (loadingText) loadingText.textContent = msg;
 }
 
-function stopLoadingProgress() {
-  if (progressTimer) {
-    clearInterval(progressTimer);
-    progressTimer = null;
-  }
-  if (stallTimer) {
-    clearInterval(stallTimer);
-    stallTimer = null;
-  }
+function clearBootWatchdogs() {
   if (window.__loadingWatchdog) {
     clearTimeout(window.__loadingWatchdog);
     window.__loadingWatchdog = null;
@@ -184,106 +168,18 @@ function stopLoadingProgress() {
   }
 }
 
-function finishCityLoad(cityRoot) {
-  if (cityLoadDone) return;
-  cityLoadDone = true;
-  stopLoadingProgress();
-
-  loadingBar.style.width = '100%';
-  STATE.cityRoot = cityRoot;
-  if (cityRoot) {
-    scene.add(STATE.cityRoot);
-  }
-
-  try {
-    initStaticScene();
-    showIntro();
-    loadingEl.classList.add('hidden');
-  } catch (err) {
-    console.error('Scene init failed', err);
-    setLoadingText('Не удалось построить сцену. Попробуй обновить страницу.');
-  }
-}
-
-function useFallbackCity(reason) {
-  if (cityLoadDone) return;
-  console.warn('Using fallback city:', reason);
-  setLoadingText('Город медлит. Включаем резервные огни...');
-  try {
-    finishCityLoad(makeFallbackCity());
-  } catch (err) {
-    console.error('Fallback city build failed', err);
-    setLoadingText('Не удалось построить сцену. Обнови страницу.');
-  }
-}
-
-const cityLoadTimeout = setTimeout(() => {
-  useFallbackCity('GLB load timeout');
-}, CITY_LOAD_TIMEOUT_MS);
-
-stallTimer = setInterval(() => {
-  if (cityLoadDone || downloadFinished) return;
-  if (performance.now() - lastProgressAt > CITY_DOWNLOAD_STALL_MS) {
-    clearTimeout(cityLoadTimeout);
-    useFallbackCity('download stalled');
-  }
-}, 1000);
-
-loader.load(
-  'la_night_2k.glb',
-  (gltf) => {
-    if (cityLoadDone) return;
-    clearTimeout(cityLoadTimeout);
-    STATE.cityRoot = gltf.scene;
-    try {
-      fitCity();
-    } catch (err) {
-      console.error('fitCity failed', err);
-      useFallbackCity(err);
-      return;
-    }
-    finishCityLoad(STATE.cityRoot);
-  },
-  (xhr) => {
-    lastProgressAt = performance.now();
-
-    if (xhr.lengthComputable && xhr.total > 0) {
-      const pct = (xhr.loaded / xhr.total) * 100;
-      loadingBar.style.width = `${pct}%`;
-      if (xhr.loaded >= xhr.total && !downloadFinished) {
-        downloadFinished = true;
-        setLoadingText('Раскладываем стекло и огни...');
-      }
-      return;
-    }
-
-    if (!progressTimer) {
-      const startedAt = performance.now();
-      progressTimer = setInterval(() => {
-        const elapsed = (performance.now() - startedAt) / 1000;
-        const pct = Math.min(92, 100 * (1 - Math.exp(-elapsed / 14)));
-        loadingBar.style.width = `${pct}%`;
-      }, 200);
-    }
-  },
-  (err) => {
-    clearTimeout(cityLoadTimeout);
-    console.error('GLB load failed', err);
-    useFallbackCity(err);
-  },
-);
-
-function fitCity() {
-  const tmpBox = new THREE.Box3().setFromObject(STATE.cityRoot);
+function fitCity(cityRoot, targetTopY = CITY_TARGET_TOP_Y) {
+  const tmpBox = new THREE.Box3().setFromObject(cityRoot);
   const csize = tmpBox.getSize(new THREE.Vector3()).length();
-  if (csize > 0) STATE.cityRoot.scale.setScalar(900 / csize);
+  if (csize > 0) cityRoot.scale.setScalar(900 / csize);
 
-  STATE.cityRoot.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(STATE.cityRoot);
+  cityRoot.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(cityRoot);
   const c = box.getCenter(new THREE.Vector3());
-  STATE.cityRoot.position.x -= c.x;
-  STATE.cityRoot.position.z -= c.z;
-  STATE.cityRoot.updateMatrixWorld(true);
+  cityRoot.position.x -= c.x;
+  cityRoot.position.z -= c.z;
+  cityRoot.position.y -= box.max.y - targetTopY;
+  cityRoot.updateMatrixWorld(true);
 }
 
 function makeFallbackCity() {
@@ -296,7 +192,7 @@ function makeFallbackCity() {
   ground.position.y = -200;
   g.add(ground);
 
-  for (let i = 0; i < 240; i++) {
+  for (let i = 0; i < 180; i++) {
     const w = 8 + Math.random() * 18;
     const d = 8 + Math.random() * 18;
     const h = 30 + Math.random() * 220;
@@ -319,89 +215,67 @@ function makeFallbackCity() {
   return g;
 }
 
-// ====================================================================
-// ROOF PICKING
-// ====================================================================
-function findTwoRoofs() {
-  const bbox = new THREE.Box3().setFromObject(STATE.cityRoot);
-  const hits = [];
-  const ray = new THREE.Raycaster();
-  ray.ray.direction.set(0, -1, 0);
-
-  const samples = 22;
-  for (let i = 0; i < samples; i++) {
-    for (let j = 0; j < samples; j++) {
-      const x = THREE.MathUtils.lerp(
-        bbox.min.x + 30,
-        bbox.max.x - 30,
-        (i + 0.5) / samples,
-      );
-      const z = THREE.MathUtils.lerp(
-        bbox.min.z + 30,
-        bbox.max.z - 30,
-        (j + 0.5) / samples,
-      );
-      ray.ray.origin.set(x, bbox.max.y + 200, z);
-
-      const isects = ray.intersectObject(STATE.cityRoot, true);
-      if (isects.length) hits.push({ x, z, y: isects[0].point.y });
-    }
+function mountCity(cityRoot) {
+  if (STATE.cityRoot) {
+    scene.remove(STATE.cityRoot);
+    disposeObject(STATE.cityRoot);
   }
+  STATE.cityRoot = cityRoot;
+  scene.add(cityRoot);
+}
 
-  if (hits.length < 2) {
-    const fallbackY = bbox.max.y - 5;
-    return [
-      { x: -25, y: fallbackY, z: 0 },
-      { x: 25, y: fallbackY, z: 0 },
-    ];
+function bootScene() {
+  try {
+    const fallback = makeFallbackCity();
+    fitCity(fallback);
+    mountCity(fallback);
+    initStaticScene();
+    showIntro();
+    loadingBar.style.width = '100%';
+    loadingEl.classList.add('hidden');
+    clearBootWatchdogs();
+    return true;
+  } catch (err) {
+    console.error('Initial scene boot failed', err);
+    setLoadingText('Не удалось построить сцену. Обнови страницу.');
+    return false;
   }
+}
 
-  hits.sort((a, b) => b.y - a.y);
-  const topPool = hits.slice(0, Math.max(8, Math.floor(hits.length * 0.25)));
-  const bridgeSpan = BRIDGE_ROWS * (TILE_SIZE + TILE_GAP);
-  const targetCenterDist = bridgeSpan + PLATFORM_SIZE;
-
-  let best = null;
-  let bestScore = Infinity;
-  for (let a = 0; a < topPool.length; a++) {
-    for (let b = a + 1; b < topPool.length; b++) {
-      const A = topPool[a];
-      const B = topPool[b];
-      const d = Math.hypot(A.x - B.x, A.z - B.z);
-      const distErr = Math.abs(d - targetCenterDist);
-      if (distErr > 22) continue;
-
-      const dy = Math.abs(A.y - B.y);
-      const centerPenalty =
-        (Math.hypot(A.x, A.z) + Math.hypot(B.x, B.z)) * 0.05;
-      const score = dy * 6 + distErr * 1.2 + centerPenalty;
-      if (score < bestScore) {
-        bestScore = score;
-        best = [A, B];
+function loadRealCityInBackground() {
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  loader.load(
+    'la_night_2k.glb',
+    (gltf) => {
+      if (!STATE.intro) {
+        console.info('Real city loaded after intro ended; keeping fallback for this run.');
+        disposeObject(gltf.scene);
+        return;
       }
-    }
-  }
-
-  if (!best) {
-    best = [topPool[0], topPool[Math.min(3, topPool.length - 1)]];
-  }
-
-  const A = best[0];
-  const B = best[1];
-  const dx = B.x - A.x;
-  const dz = B.z - A.z;
-  const cur = Math.hypot(dx, dz) || 1;
-  const ux = dx / cur;
-  const uz = dz / cur;
-  const y = (A.y + B.y) / 2;
-
-  return [
-    { x: A.x, y, z: A.z },
-    {
-      x: A.x + ux * targetCenterDist,
-      y,
-      z: A.z + uz * targetCenterDist,
+      try {
+        fitCity(gltf.scene);
+        mountCity(gltf.scene);
+        console.info('Upgraded to real city.');
+      } catch (err) {
+        console.error('Real city swap failed; keeping fallback.', err);
+      }
     },
+    undefined,
+    (err) => {
+      console.warn('Real city failed to load; staying on fallback.', err);
+    },
+  );
+}
+
+// ====================================================================
+// PLATFORM POSITIONS (fixed — no longer derived from city geometry)
+// ====================================================================
+function pickPlatformPositions() {
+  const halfDist = (BRIDGE_ROWS * (TILE_SIZE + TILE_GAP) + PLATFORM_SIZE) / 2;
+  return [
+    { x: -halfDist, y: PLATFORM_Y, z: 0 },
+    { x: halfDist, y: PLATFORM_Y, z: 0 },
   ];
 }
 
@@ -433,7 +307,9 @@ function makeRoofPlatform(isTarget) {
     metalness: 0.6,
   });
 
-  const slabH = 6.0;
+  // Tall slab so the platform always reads as a solid building tower,
+  // independent of whatever city geometry sits below it.
+  const slabH = 240.0;
   const slab = new THREE.Mesh(
     new THREE.BoxGeometry(size, slabH, size),
     concreteMat,
@@ -777,8 +653,8 @@ function buildBridge(start, end) {
 function initStaticScene() {
   if (STATE.staticBuilt) return;
 
-  const [s, t] = findTwoRoofs();
-  const yLevel = (s.y + t.y) / 2 + 0.4;
+  const [s, t] = pickPlatformPositions();
+  const yLevel = (s.y + t.y) / 2;
   STATE.startPos.set(s.x, yLevel, s.z);
   STATE.endPos.set(t.x, yLevel, t.z);
 
@@ -1346,3 +1222,10 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// ====================================================================
+// BOOT
+// ====================================================================
+if (bootScene()) {
+  loadRealCityInBackground();
+}
