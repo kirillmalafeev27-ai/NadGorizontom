@@ -44,6 +44,13 @@ window.addEventListener('error', function (event) {
 
 <canvas id="scene"></canvas>
 <div id="crosshair"></div>
+<div id="danger-warning">Непрочное стекло</div>
+<div id="move-controls" class="hidden" aria-label="Движение по тайлам">
+  <button class="move-btn move-up" type="button" data-move="forward" aria-label="Вперёд">&#8593;</button>
+  <button class="move-btn move-left" type="button" data-move="left" aria-label="Влево">&#8592;</button>
+  <button class="move-btn move-right" type="button" data-move="right" aria-label="Вправо">&#8594;</button>
+  <button class="move-btn move-down" type="button" data-move="back" aria-label="Назад">&#8595;</button>
+</div>
 
 <div id="hud" class="hidden">
   <div id="hud-top">
@@ -80,15 +87,14 @@ window.addEventListener('error', function (event) {
   <div class="card">
     <h1>Über den Wolken</h1>
     <p>
-      Ты стоишь на краю крыши. Впереди — стекло над ночным городом,
-      и от другой крыши тебя отделяют семь шагов.
+      Перед тобой стеклянный мост над ночным городом. Безопасный путь есть,
+      но его не видно: он петляет по тайлам и никогда не идёт прямой линией.
     </p>
     <p class="rules">
-      На каждом шаге — короткий вопрос на немецком.
-      Точный ответ переносит дальше; ошибка или молчание — трещина в стекле под тобой.<br />
-      <b>Мышь</b> — оглядеться. <b>Клик по варианту</b> — ответ.
+      Двигайся стрелками на клавиатуре или кнопками на экране. Если стекло
+      непрочное, красная надпись станет плотнее, но таймер не появится.
     </p>
-    <button id="start-btn">Шагнуть на мост</button>
+    <button id="start-btn">Начать путь</button>
   </div>
 </div>
 

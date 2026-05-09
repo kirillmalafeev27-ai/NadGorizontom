@@ -34,6 +34,63 @@ canvas#scene {
   z-index: 5;
 }
 
+#danger-warning {
+  position: fixed;
+  top: 18vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  pointer-events: none;
+  color: #ff2f3f;
+  font-size: clamp(18px, 3vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0;
+  filter: blur(2px);
+  text-shadow:
+    0 0 14px rgba(255, 45, 55, 0.2),
+    0 0 42px rgba(255, 45, 55, 0.08);
+  transition: opacity 0.35s ease, filter 0.35s ease, text-shadow 0.35s ease;
+  white-space: nowrap;
+}
+
+#move-controls {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 15;
+  display: grid;
+  grid-template-columns: repeat(3, 54px);
+  grid-template-rows: repeat(3, 54px);
+  gap: 8px;
+  pointer-events: auto;
+}
+.move-btn {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  border: 1px solid rgba(190, 215, 255, 0.22);
+  background: rgba(10, 16, 28, 0.58);
+  color: #edf5ff;
+  font-size: 24px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+.move-btn:active {
+  transform: translateY(1px) scale(0.98);
+  background: rgba(60, 90, 130, 0.68);
+}
+.move-up { grid-column: 2; grid-row: 1; }
+.move-left { grid-column: 1; grid-row: 2; }
+.move-right { grid-column: 3; grid-row: 2; }
+.move-down { grid-column: 2; grid-row: 3; }
+
 .hidden { display: none !important; }
 
 /* ---------- LOADING ---------- */

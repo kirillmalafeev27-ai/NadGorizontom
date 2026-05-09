@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { pickQuestion } from './questions.js';
 
 window.__gameBooted = true;
 
@@ -17,12 +16,13 @@ const BRIDGE_COLS = 3;
 const BRIDGE_ROWS = 7;
 const PLATFORM_SIZE = 9.5;
 const MOUSE_SENS = 0.0022;
-const QUESTION_TIME = 7.0;
-const STEP_MOVE_MS = 520;
-const FRAGILE_BREAK_MS = 480;
+const STEP_MOVE_MS = 460;
+const FRAGILE_BASE_SECONDS = 8;
+const FRAGILE_EXTRA_MIN_SECONDS = 1;
+const FRAGILE_EXTRA_MAX_SECONDS = 6;
 const FALL_DURATION_MS = 2400;
 const CITY_TARGET_TOP_Y = 60;
-const PLATFORM_Y = 70;
+const PLATFORM_Y = 46;
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -128,13 +128,13 @@ const STATE = {
   cameraDragging: false,
 
   step: 0,
-  currentQuestion: null,
-  qStartTime: 0,
-  questionLocked: false,
+  playerCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
   moving: false,
   moveStart: 0,
   moveFrom: new THREE.Vector3(),
   moveTo: new THREE.Vector3(),
+  moveTargetCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
+  dangerWarningStrength: 0,
 
   intro: true,
   active: false,
@@ -286,35 +286,57 @@ function makeRoofPlatform(isTarget) {
   const g = new THREE.Group();
   const size = PLATFORM_SIZE;
 
-  const concreteMat = new THREE.MeshStandardMaterial({
-    color: 0x2b2f38,
-    roughness: 0.78,
-    metalness: 0.18,
+  const towerGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x7f9fbd,
+    roughness: 0.2,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.24,
+    transmission: 0.35,
+    thickness: 1.2,
+    ior: 1.35,
+    clearcoat: 0.6,
+    envMapIntensity: 1.2,
+    depthWrite: false,
   });
   const metalMat = new THREE.MeshStandardMaterial({
     color: 0x191b21,
     roughness: 0.42,
     metalness: 0.9,
   });
-  const panelMat = new THREE.MeshStandardMaterial({
-    color: 0x383d48,
-    roughness: 0.55,
-    metalness: 0.55,
+  const panelMat = new THREE.MeshPhysicalMaterial({
+    color: 0x94b4ce,
+    roughness: 0.18,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.28,
+    transmission: 0.45,
+    thickness: 0.4,
+    clearcoat: 0.8,
+    envMapIntensity: 1.4,
+    depthWrite: false,
   });
-  const darkPanelMat = new THREE.MeshStandardMaterial({
-    color: 0x23272f,
-    roughness: 0.5,
-    metalness: 0.6,
+  const darkPanelMat = new THREE.MeshPhysicalMaterial({
+    color: 0x6f879d,
+    roughness: 0.24,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.18,
+    transmission: 0.35,
+    thickness: 0.4,
+    clearcoat: 0.65,
+    envMapIntensity: 1.1,
+    depthWrite: false,
   });
 
-  // Tall slab so the platform always reads as a solid building tower,
-  // independent of whatever city geometry sits below it.
-  const slabH = 240.0;
+  // A glass shaft keeps the spawn building readable without blocking the city below.
+  const slabH = 92.0;
   const slab = new THREE.Mesh(
     new THREE.BoxGeometry(size, slabH, size),
-    concreteMat,
+    towerGlassMat,
   );
   slab.position.y = -slabH / 2 - 0.05;
+  slab.renderOrder = 1;
   g.add(slab);
 
   const cells = 4;
@@ -411,9 +433,9 @@ function makeRoofPlatform(isTarget) {
 // ====================================================================
 function makeGlassTile(fragile) {
   const g = new THREE.Group();
-  const baseColor = fragile ? 0xb9c8de : 0xc1d3eb;
-  const roughness = fragile ? 0.16 : 0.08;
-  const opacity = fragile ? 0.42 : 0.35;
+  const baseColor = 0xc8ddf3;
+  const roughness = 0.035;
+  const opacity = 0.16;
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: baseColor,
@@ -421,12 +443,15 @@ function makeGlassTile(fragile) {
     roughness,
     transparent: true,
     opacity,
-    transmission: 0.0,
+    transmission: 0.72,
+    thickness: 0.38,
+    attenuationColor: 0xdceeff,
+    attenuationDistance: 1.8,
     ior: 1.45,
     clearcoat: 1.0,
-    clearcoatRoughness: fragile ? 0.12 : 0.05,
+    clearcoatRoughness: 0.04,
     side: THREE.DoubleSide,
-    envMapIntensity: 1.4,
+    envMapIntensity: 1.8,
     depthWrite: false,
   });
 
@@ -508,26 +533,38 @@ function makeGlassTile(fragile) {
 // SAFE PATH
 // ====================================================================
 function generateSafePath() {
-  const path = [];
-  let col = Math.floor(BRIDGE_COLS / 2);
-  let dir = Math.random() < 0.5 ? -1 : 1;
-
-  path.push(col);
-  for (let row = 1; row < BRIDGE_ROWS; row++) {
-    const canHold = row > 1 && row < BRIDGE_ROWS - 1;
-    const hold = canHold && Math.random() < 0.16;
-    if (!hold) {
-      let next = col + dir;
-      if (next < 0 || next >= BRIDGE_COLS) {
-        dir *= -1;
-        next = col + dir;
-      }
-      col = next;
-    }
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const path = [];
+    let col = Math.floor(Math.random() * BRIDGE_COLS);
+    let turns = 0;
+    let sameRun = 1;
     path.push(col);
+
+    for (let row = 1; row < BRIDGE_ROWS; row++) {
+      const moves = [-1, 0, 1].filter((move) => {
+        const next = col + move;
+        if (next < 0 || next >= BRIDGE_COLS) return false;
+        if (move === 0 && sameRun >= 2) return false;
+        return true;
+      });
+      const lateralMoves = moves.filter((move) => move !== 0);
+      const pool =
+        lateralMoves.length && Math.random() < 0.72 ? lateralMoves : moves;
+      const move = pool[Math.floor(Math.random() * pool.length)];
+      if (move === 0) sameRun += 1;
+      else {
+        sameRun = 1;
+        turns += 1;
+      }
+      col += move;
+      path.push(col);
+    }
+
+    const uniqueCols = new Set(path).size;
+    if (turns >= 3 && uniqueCols > 1) return path;
   }
 
-  return path;
+  return [1, 0, 1, 2, 1, 0, 1].slice(0, BRIDGE_ROWS);
 }
 
 // ====================================================================
@@ -551,16 +588,21 @@ function buildBridge(start, end) {
   });
 
   const totalWidth = BRIDGE_COLS * TILE_SIZE + (BRIDGE_COLS - 1) * TILE_GAP;
-  const rim = new THREE.Mesh(
-    new THREE.BoxGeometry(totalWidth + 0.6, 0.16, length),
-    frameMat,
-  );
-  rim.position.copy(start).addScaledVector(dir, 0.5);
-  rim.position.y -= TILE_THICKNESS / 2 + 0.08;
-  rim.rotation.y = yaw;
-  group.add(rim);
-
   const railOffset = totalWidth / 2 + 0.12;
+  for (const sign of [-1, 1]) {
+    const sideBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.12, length),
+      frameMat,
+    );
+    sideBeam.position
+      .copy(start)
+      .addScaledVector(dir, 0.5)
+      .addScaledVector(right, sign * railOffset);
+    sideBeam.position.y -= TILE_THICKNESS / 2 + 0.08;
+    sideBeam.rotation.y = yaw;
+    group.add(sideBeam);
+  }
+
   for (let i = 0; i <= BRIDGE_ROWS; i++) {
     const p = start.clone().lerp(end, i / BRIDGE_ROWS);
     for (const sign of [-1, 1]) {
@@ -621,6 +663,7 @@ function buildBridge(start, end) {
         broken: false,
         triggered: false,
         triggerTime: 0,
+        dangerDuration: 0,
       });
     }
   }
@@ -709,10 +752,7 @@ function softRestart() {
 
   resetPlayer();
   gameoverEl.classList.add('hidden');
-  hud.classList.remove('hidden');
-  STATE.intro = false;
-  STATE.active = true;
-  startQuestion();
+  enterPlay();
 }
 
 function disposeObject(obj) {
@@ -727,12 +767,16 @@ function disposeObject(obj) {
 
 function resetPlayer() {
   STATE.step = 0;
-  STATE.currentQuestion = null;
-  STATE.questionLocked = false;
   STATE.moving = false;
-  STATE.player.pos.copy(stepWorldPosition(0));
+  STATE.playerCell.row = -1;
+  STATE.playerCell.col = Math.floor(BRIDGE_COLS / 2);
+  STATE.moveTargetCell.row = STATE.playerCell.row;
+  STATE.moveTargetCell.col = STATE.playerCell.col;
+  STATE.player.pos.copy(cellWorldPosition(STATE.playerCell.row, STATE.playerCell.col));
   STATE.player.yaw = Math.atan2(-STATE.forwardDir.x, -STATE.forwardDir.z);
   STATE.player.pitch = -0.05;
+  setDangerWarning(0);
+  updateHudProgress();
 }
 
 // ====================================================================
@@ -807,7 +851,44 @@ const gameoverEl = document.getElementById('gameover');
 const endTitle = document.getElementById('endtitle');
 const endText = document.getElementById('endtext');
 const restartBtn = document.getElementById('restart');
+const dangerWarning = document.getElementById('danger-warning');
+const moveControls = document.getElementById('move-controls');
 if (quizEl) quizEl.classList.add('hidden');
+
+function setDangerWarning(strength) {
+  STATE.dangerWarningStrength = THREE.MathUtils.clamp(strength, 0, 1);
+  if (!dangerWarning) return;
+
+  const pulse = (Math.sin(performance.now() * 0.003) + 1) * 0.5;
+  const opacity = STATE.dangerWarningStrength <= 0
+    ? 0
+    : 0.18 + STATE.dangerWarningStrength * 0.62 + pulse * 0.08;
+  const blur = THREE.MathUtils.lerp(2.6, 0.1, STATE.dangerWarningStrength);
+  const glow = 0.12 + STATE.dangerWarningStrength * 0.5 + pulse * 0.12;
+
+  dangerWarning.style.opacity = String(Math.min(opacity, 0.88));
+  dangerWarning.style.filter = `blur(${blur.toFixed(2)}px)`;
+  dangerWarning.style.textShadow =
+    `0 0 16px rgba(255, 45, 55, ${glow.toFixed(2)}), ` +
+    `0 0 48px rgba(255, 45, 55, ${(glow * 0.5).toFixed(2)})`;
+}
+
+function updateHudProgress() {
+  const currentRow = Math.max(0, Math.min(BRIDGE_ROWS, STATE.playerCell.row + 1));
+  stepNumber.textContent = String(currentRow);
+  stepTotal.textContent = String(BRIDGE_ROWS);
+}
+
+function enterPlay() {
+  intro.classList.add('hidden');
+  hud.classList.remove('hidden');
+  moveControls?.classList.remove('hidden');
+  quizEl.classList.add('hidden');
+  STATE.intro = false;
+  STATE.active = true;
+  setDangerWarning(0);
+  updateHudProgress();
+}
 
 function showIntro() {
   stepTotal.textContent = String(BRIDGE_ROWS);
@@ -816,14 +897,12 @@ function showIntro() {
   STATE.intro = true;
   STATE.active = false;
   quizEl.classList.add('hidden');
+  moveControls?.classList.add('hidden');
+  setDangerWarning(0);
 }
 
 startBtn.addEventListener('click', () => {
-  intro.classList.add('hidden');
-  hud.classList.remove('hidden');
-  STATE.intro = false;
-  STATE.active = true;
-  startQuestion();
+  enterPlay();
 });
 
 restartBtn.addEventListener('click', () => {
@@ -852,6 +931,31 @@ document.addEventListener('mousemove', (e) => {
   STATE.player.yaw -= e.movementX * MOUSE_SENS;
   STATE.player.pitch -= e.movementY * MOUSE_SENS;
   STATE.player.pitch = THREE.MathUtils.clamp(STATE.player.pitch, -1.35, 1.35);
+});
+
+const keyMoves = new Map([
+  ['ArrowUp', 'forward'],
+  ['KeyW', 'forward'],
+  ['ArrowDown', 'back'],
+  ['KeyS', 'back'],
+  ['ArrowLeft', 'left'],
+  ['KeyA', 'left'],
+  ['ArrowRight', 'right'],
+  ['KeyD', 'right'],
+]);
+
+document.addEventListener('keydown', (e) => {
+  const command = keyMoves.get(e.code);
+  if (!command) return;
+  e.preventDefault();
+  requestMove(command);
+});
+
+moveControls?.querySelectorAll('[data-move]').forEach((button) => {
+  button.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    requestMove(button.dataset.move);
+  });
 });
 
 // ====================================================================
@@ -898,143 +1002,112 @@ function isOnPlatform(pos, plPos) {
 // ====================================================================
 // GAME UPDATE
 // ====================================================================
-function stepWorldPosition(step) {
-  if (step <= 0) {
+function columnLateral(col) {
+  return (col - (BRIDGE_COLS - 1) / 2) * (TILE_SIZE + TILE_GAP);
+}
+
+function cellWorldPosition(row, col) {
+  const safeCol = Math.max(0, Math.min(BRIDGE_COLS - 1, col));
+  if (row < 0) {
     return STATE.startPos
       .clone()
-      .addScaledVector(STATE.forwardDir, -PLATFORM_SIZE * 0.25);
+      .addScaledVector(STATE.forwardDir, -PLATFORM_SIZE * 0.25)
+      .addScaledVector(STATE.rightDir, columnLateral(safeCol));
   }
 
-  if (step > BRIDGE_ROWS) {
+  if (row >= BRIDGE_ROWS) {
     return STATE.endPos
       .clone()
-      .addScaledVector(STATE.forwardDir, -PLATFORM_SIZE * 0.18);
+      .addScaledVector(STATE.forwardDir, -PLATFORM_SIZE * 0.18)
+      .addScaledVector(STATE.rightDir, columnLateral(safeCol));
   }
 
-  const row = step - 1;
-  const col = STATE.safePath[row] ?? Math.floor(BRIDGE_COLS / 2);
-  return STATE.tiles[row * BRIDGE_COLS + col].position.clone();
+  return STATE.tiles[row * BRIDGE_COLS + safeCol].position.clone();
 }
 
 function currentTileIndex() {
-  if (STATE.step < 1 || STATE.step > BRIDGE_ROWS) return -1;
-  const row = STATE.step - 1;
-  const col = STATE.safePath[row] ?? Math.floor(BRIDGE_COLS / 2);
+  const { row, col } = STATE.playerCell;
+  if (row < 0 || row >= BRIDGE_ROWS) return -1;
   return row * BRIDGE_COLS + col;
 }
 
-function setOptionsDisabled(disabled) {
-  optionsEl.querySelectorAll('button').forEach((button) => {
-    button.disabled = disabled;
-  });
+function randomFragileDurationMs() {
+  const extra =
+    FRAGILE_EXTRA_MIN_SECONDS +
+    Math.random() * (FRAGILE_EXTRA_MAX_SECONDS - FRAGILE_EXTRA_MIN_SECONDS);
+  return (FRAGILE_BASE_SECONDS + extra) * 1000;
 }
 
-function startQuestion() {
-  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
-
-  STATE.currentQuestion = pickQuestion();
-  STATE.questionLocked = false;
-  STATE.qStartTime = performance.now();
-
-  questionEl.textContent = STATE.currentQuestion.q.replace('___', '_____');
-  optionsEl.innerHTML = '';
-  STATE.currentQuestion.options.forEach((option, idx) => {
-    const button = document.createElement('button');
-    button.className = 'option';
-    button.textContent = option;
-    button.addEventListener('click', () => onAnswer(idx, button));
-    optionsEl.appendChild(button);
-  });
-
-  timerFill.style.transform = 'scaleX(1)';
-  timerFill.classList.remove('warn', 'crit');
-  timerLabel.textContent = QUESTION_TIME.toFixed(1);
-  stepNumber.textContent = String(Math.min(STATE.step + 1, BRIDGE_ROWS));
-  quizEl.classList.remove('hidden');
-}
-
-function onAnswer(idx, button) {
-  if (!STATE.active || STATE.questionLocked || STATE.moving || !STATE.currentQuestion) {
-    return;
-  }
-
-  STATE.questionLocked = true;
-  setOptionsDisabled(true);
-
-  const correct = STATE.currentQuestion.correct === idx;
-  if (correct) {
-    button.classList.add('correct');
-    setTimeout(advanceStep, 180);
-    return;
-  }
-
-  button.classList.add('wrong');
-  quizEl.classList.remove('shake');
-  void quizEl.offsetWidth;
-  quizEl.classList.add('shake');
-
-  if (!bumpCrackOnCurrent(0.28)) {
-    setTimeout(() => {
-      if (!STATE.active || STATE.falling || STATE.won) return;
-      startQuestion();
-    }, 420);
-  }
-}
-
-function bumpCrackOnCurrent(amount) {
-  const idx = currentTileIndex();
-  if (idx < 0) return false;
-
+function armFragileTile(idx, now = performance.now()) {
   const meta = STATE.tileMeta[idx];
+  if (!meta || !meta.fragile || meta.broken || meta.triggered) return;
   meta.triggered = true;
-  meta.triggerTime = performance.now();
-  meta.crackProgress = Math.min(1, meta.crackProgress + amount);
-
-  if (meta.crackProgress >= 1) {
-    breakCurrentTile();
-    triggerFall();
-    return true;
-  }
-
-  setTimeout(() => {
-    if (!STATE.active || STATE.falling || STATE.won) return;
-    startQuestion();
-  }, 420);
-  return true;
+  meta.triggerTime = now;
+  meta.dangerDuration = randomFragileDurationMs();
 }
 
-function breakCurrentTile() {
-  const idx = currentTileIndex();
-  if (idx < 0) return;
-
+function breakTile(idx) {
   const meta = STATE.tileMeta[idx];
+  if (!meta || meta.broken) return;
   meta.broken = true;
   STATE.tiles[idx].userData.shatterStart = performance.now();
 }
 
-function advanceStep() {
-  if (!STATE.active || STATE.falling || STATE.won) return;
+function landOnCell(row, col) {
+  STATE.playerCell.row = row;
+  STATE.playerCell.col = col;
+  STATE.step = Math.max(0, Math.min(BRIDGE_ROWS, row + 1));
+  updateHudProgress();
 
-  quizEl.classList.add('hidden');
-  STATE.currentQuestion = null;
-  STATE.questionLocked = true;
+  if (row >= BRIDGE_ROWS) {
+    onWin();
+    return;
+  }
+
+  const idx = currentTileIndex();
+  if (idx >= 0) armFragileTile(idx);
+}
+
+function startMoveToCell(row, col) {
+  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
+
   STATE.moving = true;
   STATE.moveStart = performance.now();
   STATE.moveFrom.copy(STATE.player.pos);
-  STATE.step += 1;
-  STATE.moveTo.copy(stepWorldPosition(STATE.step));
-  stepNumber.textContent = String(Math.min(STATE.step, BRIDGE_ROWS));
+  STATE.moveTo.copy(cellWorldPosition(row, col));
+  STATE.moveTargetCell.row = row;
+  STATE.moveTargetCell.col = col;
+  setDangerWarning(0);
+}
+
+function requestMove(command) {
+  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
+
+  let { row, col } = STATE.playerCell;
+  if (command === 'forward') row += 1;
+  if (command === 'back') row -= 1;
+  if (command === 'left') col -= 1;
+  if (command === 'right') col += 1;
+
+  if (row < -1 || row > BRIDGE_ROWS) return;
+  if (col < 0 || col >= BRIDGE_COLS) return;
+  startMoveToCell(row, col);
 }
 
 function updateGame(t) {
-  if (STATE.falling || STATE.won || !STATE.active) return;
+  return updateMovementGame(t);
+
+  if (STATE.falling || STATE.won || !STATE.active) {
+    setDangerWarning(0);
+    return;
+  }
 
   if (STATE.moving) {
     const raw = (t - STATE.moveStart) / STEP_MOVE_MS;
     const p = THREE.MathUtils.clamp(raw, 0, 1);
     const eased = p * p * (3 - 2 * p);
     STATE.player.pos.copy(STATE.moveFrom).lerp(STATE.moveTo, eased);
-    STATE.player.pos.y = STATE.groundY;
+    STATE.player.pos.y = STATE.groundY + Math.sin(p * Math.PI) * 0.08;
 
     if (p >= 1) {
       STATE.moving = false;
@@ -1083,12 +1156,60 @@ function updateGame(t) {
   }
 }
 
+function updateMovementGame(t) {
+  if (STATE.falling || STATE.won || !STATE.active) {
+    setDangerWarning(0);
+    return;
+  }
+
+  if (STATE.moving) {
+    const raw = (t - STATE.moveStart) / STEP_MOVE_MS;
+    const p = THREE.MathUtils.clamp(raw, 0, 1);
+    const eased = p * p * (3 - 2 * p);
+    STATE.player.pos.copy(STATE.moveFrom).lerp(STATE.moveTo, eased);
+    STATE.player.pos.y = STATE.groundY + Math.sin(p * Math.PI) * 0.08;
+
+    if (p >= 1) {
+      STATE.moving = false;
+      STATE.player.pos.copy(STATE.moveTo);
+      landOnCell(STATE.moveTargetCell.row, STATE.moveTargetCell.col);
+    }
+  }
+
+  const currentIdx = STATE.moving ? -1 : currentTileIndex();
+  let warningStrength = 0;
+
+  for (let i = 0; i < STATE.tileMeta.length; i++) {
+    const meta = STATE.tileMeta[i];
+    if (!meta.triggered || !meta.fragile || meta.broken) continue;
+
+    const elapsed = t - meta.triggerTime;
+    const duration = meta.dangerDuration || randomFragileDurationMs();
+    meta.dangerDuration = duration;
+    const ratio = THREE.MathUtils.clamp(elapsed / duration, 0, 1);
+    meta.crackProgress = Math.max(meta.crackProgress, ratio);
+
+    if (i === currentIdx) {
+      warningStrength = 0.18 + ratio * 0.82;
+    }
+
+    if (elapsed >= duration) {
+      breakTile(i);
+      if (i === currentIdx) triggerFall();
+    }
+  }
+
+  setDangerWarning(warningStrength);
+}
+
 function onWin() {
   if (STATE.won) return;
   STATE.won = true;
   STATE.active = false;
   STATE.currentQuestion = null;
   quizEl.classList.add('hidden');
+  moveControls?.classList.add('hidden');
+  setDangerWarning(0);
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 
   endTitle.textContent = 'Du hast es geschafft!';
@@ -1103,6 +1224,8 @@ function triggerFall() {
   STATE.moving = false;
   STATE.currentQuestion = null;
   quizEl.classList.add('hidden');
+  moveControls?.classList.add('hidden');
+  setDangerWarning(0);
   STATE.fallStart = performance.now();
   STATE.fallVel.set(
     (Math.random() - 0.5) * 0.4,
@@ -1141,7 +1264,7 @@ function animate() {
     }
   }
 
-  updateGame(t);
+  updateMovementGame(t);
 
   for (let i = 0; i < STATE.tiles.length; i++) {
     const tile = STATE.tiles[i];
@@ -1149,8 +1272,13 @@ function animate() {
 
     if (meta.triggered && meta.fragile && !meta.broken) {
       const elapsed = t - meta.triggerTime;
-      meta.crackProgress = Math.min(1, elapsed / FRAGILE_BREAK_MS);
-      if (elapsed >= FRAGILE_BREAK_MS) meta.broken = true;
+      const duration = meta.dangerDuration || randomFragileDurationMs();
+      meta.dangerDuration = duration;
+      meta.crackProgress = Math.max(
+        meta.crackProgress,
+        THREE.MathUtils.clamp(elapsed / duration, 0, 1),
+      );
+      if (elapsed >= duration) breakTile(i);
     }
 
     if (meta.broken) {
@@ -1174,12 +1302,9 @@ function animate() {
       const base = tile.userData.baseColor;
       const white = new THREE.Color(0xffffff);
       mat.color.copy(base).lerp(white, cp * 0.55);
-      mat.opacity = THREE.MathUtils.lerp(meta.fragile ? 0.42 : 0.35, 0.85, cp);
-      mat.roughness = THREE.MathUtils.lerp(
-        meta.fragile ? 0.16 : 0.08,
-        0.45,
-        cp,
-      );
+      mat.opacity = THREE.MathUtils.lerp(0.16, 0.62, cp);
+      mat.roughness = THREE.MathUtils.lerp(0.035, 0.58, cp);
+      mat.transmission = THREE.MathUtils.lerp(0.72, 0.08, cp);
       tile.position.y =
         tile.userData.baseY - cp * 0.05 - Math.sin(t * 0.02) * cp * 0.005;
     }
