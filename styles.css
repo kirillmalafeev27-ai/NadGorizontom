@@ -86,6 +86,10 @@ canvas#scene {
   transform: translateY(1px) scale(0.98);
   background: rgba(60, 90, 130, 0.68);
 }
+#move-controls.locked .move-btn {
+  opacity: 0.42;
+  cursor: default;
+}
 .move-up { grid-column: 2; grid-row: 1; }
 .move-left { grid-column: 1; grid-row: 2; }
 .move-right { grid-column: 3; grid-row: 2; }
@@ -200,12 +204,7 @@ canvas#scene {
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 #timer-bar {
-  position: relative;
-  height: 3px;
-  background: rgba(160, 180, 220, 0.12);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 6px;
+  display: none;
 }
 #timer-fill {
   position: absolute;
@@ -217,13 +216,7 @@ canvas#scene {
 #timer-fill.warn { background: linear-gradient(90deg, #f6c971, #ffd9a0); }
 #timer-fill.crit { background: linear-gradient(90deg, #ff5a6a, #ff9197); }
 #timer-label {
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: #7a8aa6;
-  margin-bottom: 14px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+  display: none;
 }
 #question {
   font-size: 20px;

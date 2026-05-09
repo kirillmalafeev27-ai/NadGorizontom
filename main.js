@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { pickQuestion } from './questions.js';
 
 window.__gameBooted = true;
 
@@ -12,6 +13,7 @@ const PLAYER_RADIUS = 0.28;
 const TILE_SIZE = 1.6;
 const TILE_THICKNESS = 0.07;
 const TILE_GAP = 0.04;
+const TILE_NEON_COLOR = 0x70f6ff;
 const BRIDGE_COLS = 3;
 const BRIDGE_ROWS = 7;
 const PLATFORM_SIZE = 9.5;
@@ -22,7 +24,7 @@ const FRAGILE_EXTRA_MIN_SECONDS = 1;
 const FRAGILE_EXTRA_MAX_SECONDS = 6;
 const FALL_DURATION_MS = 2400;
 const CITY_TARGET_TOP_Y = 60;
-const PLATFORM_Y = 46;
+const PLATFORM_Y = 32;
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -128,6 +130,8 @@ const STATE = {
   cameraDragging: false,
 
   step: 0,
+  currentQuestion: null,
+  questionLocked: false,
   playerCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
   moving: false,
   moveStart: 0,
@@ -431,6 +435,48 @@ function makeRoofPlatform(isTarget) {
 // ====================================================================
 // GLASS TILE
 // ====================================================================
+let tileEdgeGlowTexture = null;
+
+function getTileEdgeGlowTexture() {
+  if (tileEdgeGlowTexture) return tileEdgeGlowTexture;
+
+  const size = 512;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  const inset = 58;
+  const rectSize = size - inset * 2;
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  for (let i = 0; i < 20; i++) {
+    const p = i / 17;
+    const alpha = 0.042 * (1 - p) ** 1.45;
+    ctx.strokeStyle = `rgba(112, 246, 255, ${alpha})`;
+    ctx.lineWidth = 108 - p * 92;
+    ctx.strokeRect(inset, inset, rectSize, rectSize);
+  }
+
+  ctx.strokeStyle = 'rgba(202, 255, 255, 0.54)';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(inset, inset, rectSize, rectSize);
+
+  ctx.strokeStyle = 'rgba(112, 246, 255, 0.28)';
+  ctx.lineWidth = 22;
+  ctx.strokeRect(inset, inset, rectSize, rectSize);
+
+  tileEdgeGlowTexture = new THREE.CanvasTexture(c);
+  tileEdgeGlowTexture.colorSpace = THREE.SRGBColorSpace;
+  tileEdgeGlowTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  tileEdgeGlowTexture.magFilter = THREE.LinearFilter;
+  tileEdgeGlowTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tileEdgeGlowTexture.needsUpdate = true;
+  return tileEdgeGlowTexture;
+}
+
 function makeGlassTile(fragile) {
   const g = new THREE.Group();
   const baseColor = 0xc8ddf3;
@@ -464,6 +510,35 @@ function makeGlassTile(fragile) {
   g.userData.glassMat = glassMat;
   g.userData.fragile = fragile;
   g.userData.baseColor = new THREE.Color(baseColor);
+  g.userData.neonMats = [];
+  g.userData.neonLights = [];
+
+  const edgeGlowMat = new THREE.MeshBasicMaterial({
+    color: TILE_NEON_COLOR,
+    map: getTileEdgeGlowTexture(),
+    transparent: true,
+    opacity: 0.62,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+  });
+  g.userData.neonMats.push(edgeGlowMat);
+
+  const edgeGlow = new THREE.Mesh(
+    new THREE.PlaneGeometry(TILE_SIZE + 0.36, TILE_SIZE + 0.36),
+    edgeGlowMat,
+  );
+  edgeGlow.rotation.x = -Math.PI / 2;
+  edgeGlow.position.y = TILE_THICKNESS / 2 + 0.024;
+  edgeGlow.renderOrder = 2;
+  g.add(edgeGlow);
+  g.userData.edgeGlow = edgeGlow;
+
+  const softLight = new THREE.PointLight(TILE_NEON_COLOR, 0.052, 2.8, 2.0);
+  softLight.position.set(0, 0.24, 0);
+  g.add(softLight);
+  g.userData.neonLights.push(softLight);
 
   const mountMat = new THREE.MeshStandardMaterial({
     color: 0x1d1f25,
@@ -767,6 +842,8 @@ function disposeObject(obj) {
 
 function resetPlayer() {
   STATE.step = 0;
+  STATE.currentQuestion = null;
+  STATE.questionLocked = false;
   STATE.moving = false;
   STATE.playerCell.row = -1;
   STATE.playerCell.col = Math.floor(BRIDGE_COLS / 2);
@@ -775,6 +852,7 @@ function resetPlayer() {
   STATE.player.pos.copy(cellWorldPosition(STATE.playerCell.row, STATE.playerCell.col));
   STATE.player.yaw = Math.atan2(-STATE.forwardDir.x, -STATE.forwardDir.z);
   STATE.player.pitch = -0.05;
+  quizEl?.classList.add('hidden');
   setDangerWarning(0);
   updateHudProgress();
 }
@@ -844,6 +922,7 @@ const questionEl = document.getElementById('question');
 const optionsEl = document.getElementById('options');
 const timerFill = document.getElementById('timer-fill');
 const timerLabel = document.getElementById('timer-label');
+const hintEl = document.getElementById('hint');
 const stepNumber = document.getElementById('step-number');
 const stepTotal = document.getElementById('step-total');
 const altitudeEl = document.getElementById('altitude');
@@ -854,6 +933,9 @@ const restartBtn = document.getElementById('restart');
 const dangerWarning = document.getElementById('danger-warning');
 const moveControls = document.getElementById('move-controls');
 if (quizEl) quizEl.classList.add('hidden');
+if (timerFill) timerFill.style.transform = 'scaleX(1)';
+if (timerLabel) timerLabel.textContent = '';
+if (hintEl) hintEl.textContent = 'Ответ откроет следующий шаг. Время стекла не показывается.';
 
 function setDangerWarning(strength) {
   STATE.dangerWarningStrength = THREE.MathUtils.clamp(strength, 0, 1);
@@ -879,11 +961,95 @@ function updateHudProgress() {
   stepTotal.textContent = String(BRIDGE_ROWS);
 }
 
+function setOptionsDisabled(disabled) {
+  optionsEl.querySelectorAll('button').forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
+function clearQuestion() {
+  STATE.currentQuestion = null;
+  STATE.questionLocked = false;
+  quizEl.classList.add('hidden');
+  moveControls?.classList.remove('locked');
+}
+
+function startQuestion() {
+  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
+  if (STATE.playerCell.row < 0 || STATE.playerCell.row >= BRIDGE_ROWS) return;
+
+  STATE.currentQuestion = pickQuestion();
+  STATE.questionLocked = false;
+
+  questionEl.textContent = STATE.currentQuestion.q.replace('___', '_____');
+  optionsEl.innerHTML = '';
+  STATE.currentQuestion.options.forEach((option, idx) => {
+    const button = document.createElement('button');
+    button.className = 'option';
+    button.textContent = option;
+    button.addEventListener('click', () => onAnswer(idx, button));
+    optionsEl.appendChild(button);
+  });
+
+  quizEl.classList.remove('shake');
+  quizEl.classList.remove('hidden');
+  moveControls?.classList.add('locked');
+}
+
+function damageCurrentTile(amount) {
+  const idx = currentTileIndex();
+  if (idx < 0) return false;
+
+  const meta = STATE.tileMeta[idx];
+  meta.crackProgress = Math.min(1, meta.crackProgress + amount);
+  if (meta.fragile) armFragileTile(idx);
+
+  if (meta.crackProgress >= 1) {
+    breakTile(idx);
+    triggerFall();
+    return true;
+  }
+
+  return false;
+}
+
+function onAnswer(idx, button) {
+  if (!STATE.active || STATE.questionLocked || !STATE.currentQuestion) return;
+
+  STATE.questionLocked = true;
+  setOptionsDisabled(true);
+
+  if (STATE.currentQuestion.correct === idx) {
+    button.classList.add('correct');
+    setTimeout(() => {
+      if (!STATE.active || STATE.falling || STATE.won) return;
+      clearQuestion();
+    }, 220);
+    return;
+  }
+
+  button.classList.add('wrong');
+  quizEl.classList.remove('shake');
+  void quizEl.offsetWidth;
+  quizEl.classList.add('shake');
+
+  const fell = damageCurrentTile(0.32);
+  if (fell) return;
+
+  setTimeout(() => {
+    if (!STATE.active || STATE.falling || STATE.won) return;
+    startQuestion();
+  }, 620);
+}
+
 function enterPlay() {
   intro.classList.add('hidden');
   hud.classList.remove('hidden');
   moveControls?.classList.remove('hidden');
+  moveControls?.classList.remove('locked');
   quizEl.classList.add('hidden');
+  STATE.currentQuestion = null;
+  STATE.questionLocked = false;
   STATE.intro = false;
   STATE.active = true;
   setDangerWarning(0);
@@ -896,8 +1062,11 @@ function showIntro() {
   intro.classList.remove('hidden');
   STATE.intro = true;
   STATE.active = false;
+  STATE.currentQuestion = null;
+  STATE.questionLocked = false;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
+  moveControls?.classList.remove('locked');
   setDangerWarning(0);
 }
 
@@ -1066,11 +1235,13 @@ function landOnCell(row, col) {
 
   const idx = currentTileIndex();
   if (idx >= 0) armFragileTile(idx);
+  startQuestion();
 }
 
 function startMoveToCell(row, col) {
   if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
 
+  clearQuestion();
   STATE.moving = true;
   STATE.moveStart = performance.now();
   STATE.moveFrom.copy(STATE.player.pos);
@@ -1082,6 +1253,7 @@ function startMoveToCell(row, col) {
 
 function requestMove(command) {
   if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
+  if (STATE.currentQuestion) return;
 
   let { row, col } = STATE.playerCell;
   if (command === 'forward') row += 1;
@@ -1095,7 +1267,10 @@ function requestMove(command) {
 }
 
 function updateGame(t) {
-  return updateMovementGame(t);
+  updateMovementGame(t);
+}
+
+function unusedOldQuestionTimerUpdate(t) {
 
   if (STATE.falling || STATE.won || !STATE.active) {
     setDangerWarning(0);
@@ -1288,10 +1463,24 @@ function animate() {
         0,
         tile.userData.glassMat.opacity - dt * 0.8,
       );
+      tile.userData.neonMats?.forEach((mat, idx) => {
+        mat.opacity = Math.max(0, mat.opacity - dt * (idx === 0 ? 0.55 : 0.35));
+      });
+      tile.userData.neonLights?.forEach((light) => {
+        light.intensity = Math.max(0, light.intensity - dt * 0.08);
+      });
       continue;
     }
 
     const cp = meta.crackProgress;
+    const neonPulse = (Math.sin(t * 0.0022 + i * 0.7) + 1) * 0.5;
+    if (tile.userData.neonMats?.length) {
+      tile.userData.neonMats[0].opacity = Math.min(0.82, 0.54 + neonPulse * 0.1 + cp * 0.12);
+    }
+    if (tile.userData.neonLights?.length) {
+      tile.userData.neonLights[0].intensity = 0.032 + neonPulse * 0.018 + cp * 0.025;
+    }
+
     if (cp > 0) {
       const cracks = tile.userData.cracks;
       cracks.children.forEach((line, idx) => {
