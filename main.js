@@ -31,13 +31,10 @@ const FRAGILE_BASE_SECONDS = 8;
 const FRAGILE_EXTRA_MIN_SECONDS = 1;
 const FRAGILE_EXTRA_MAX_SECONDS = 6;
 const FALL_GRAVITY = 9.81;
-const FALL_TIME_SCALE = 0.72;
-const FALL_INITIAL_SPEED = -0.85;
+const FALL_DURATION_MS = 5000;
 const FALL_COLLISION_CLEARANCE = 1.15;
-const FALL_MIN_DROP = 24;
 const FALL_CAMERA_UP_PITCH = 1.18;
 const FALL_DIARY_DELAY_MS = 650;
-const FALL_FAILSAFE_MS = 6200;
 const CITY_TARGET_TOP_Y = 60;
 const PLATFORM_Y = 86;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -175,6 +172,9 @@ const STATE = {
   fallCameraRoll: 0,
   fallImpactY: null,
   fallStartY: 0,
+  fallStartPos: new THREE.Vector3(),
+  fallTargetPos: new THREE.Vector3(),
+  fallAccelY: FALL_GRAVITY,
   won: false,
   fallVel: new THREE.Vector3(),
   fallStart: 0,
@@ -863,6 +863,9 @@ function rebuildRun() {
   STATE.fallDiaryShown = false;
   STATE.fallImpactY = null;
   STATE.fallStartY = 0;
+  STATE.fallAccelY = FALL_GRAVITY;
+  STATE.fallStartPos.set(0, 0, 0);
+  STATE.fallTargetPos.set(0, 0, 0);
   STATE.fallLandTime = 0;
   STATE.won = false;
   STATE.fallVel.set(0, 0, 0);
@@ -2033,40 +2036,75 @@ function onWin() {
 
 const fallRaycaster = new THREE.Raycaster();
 
-function citySurfaceYBelow(pos) {
-  if (!STATE.cityRoot || !STATE.cityBounds) return null;
-
-  const rayStartY = Math.max(pos.y + 6, STATE.cityBounds.max.y + 80);
-  fallRaycaster.ray.origin.set(pos.x, rayStartY, pos.z);
-  fallRaycaster.ray.direction.copy(WORLD_DOWN);
-
-  const hits = fallRaycaster.intersectObject(STATE.cityRoot, true);
-  const highestAllowedSurfaceY = Number.isFinite(STATE.fallStartY)
-    ? STATE.fallStartY - FALL_MIN_DROP
-    : pos.y + 0.2;
-  const surfaceCeiling = Math.min(pos.y + 0.2, highestAllowedSurfaceY);
-  const surface = hits.find((hit) => hit.point.y <= surfaceCeiling);
-  return surface ? surface.point.y : null;
+function fallImpactY() {
+  if (STATE.cityBounds) return STATE.cityBounds.min.y + FALL_COLLISION_CLEARANCE;
+  return STATE.groundY - 120;
 }
 
-function fallImpactY(pos) {
-  const maxImpactY = Number.isFinite(STATE.fallStartY)
-    ? STATE.fallStartY - FALL_MIN_DROP
-    : Infinity;
-  const surfaceY = citySurfaceYBelow(pos);
-  if (Number.isFinite(surfaceY)) {
-    return Math.min(surfaceY + FALL_COLLISION_CLEARANCE, maxImpactY);
+function firstCitySurfaceYAt(x, z) {
+  if (!STATE.cityRoot || !STATE.cityBounds) return null;
+  fallRaycaster.ray.origin.set(x, STATE.cityBounds.max.y + 120, z);
+  fallRaycaster.ray.direction.copy(WORLD_DOWN);
+  const hits = fallRaycaster.intersectObject(STATE.cityRoot, true);
+  return hits.length ? hits[0].point.y : null;
+}
+
+function findClearFallTarget(startPos) {
+  if (!STATE.cityRoot || !STATE.cityBounds) return startPos.clone();
+
+  const bottomY = fallImpactY();
+  const maxClearSurfaceY = bottomY + 8;
+  const radii = [0, 4, 8, 14, 22, 32, 44];
+  let best = startPos.clone();
+  let bestScore = Infinity;
+
+  for (const radius of radii) {
+    const steps = radius === 0 ? 1 : 14;
+    for (let i = 0; i < steps; i++) {
+      const angle = steps === 1 ? 0 : (i / steps) * Math.PI * 2;
+      const x = startPos.x + Math.cos(angle) * radius;
+      const z = startPos.z + Math.sin(angle) * radius;
+      if (
+        x < STATE.cityBounds.min.x ||
+        x > STATE.cityBounds.max.x ||
+        z < STATE.cityBounds.min.z ||
+        z > STATE.cityBounds.max.z
+      ) {
+        continue;
+      }
+
+      const surfaceY = firstCitySurfaceYAt(x, z);
+      const roofPenalty = Number.isFinite(surfaceY)
+        ? Math.max(0, surfaceY - maxClearSurfaceY)
+        : 0;
+      const distancePenalty = Math.hypot(x - startPos.x, z - startPos.z) * 0.12;
+      const score = roofPenalty * 12 + distancePenalty;
+      if (score < bestScore) {
+        bestScore = score;
+        best.set(x, bottomY, z);
+      }
+      if (roofPenalty <= 0.001) return best;
+    }
   }
 
-  if (STATE.cityBounds) {
-    const minDropSurfaceY = Number.isFinite(STATE.fallStartY)
-      ? STATE.fallStartY - FALL_MIN_DROP - FALL_COLLISION_CLEARANCE
-      : STATE.groundY - 5;
-    const skylineY = Math.min(STATE.groundY - 5, STATE.cityBounds.max.y - 0.8, minDropSurfaceY);
-    return Math.min(skylineY + FALL_COLLISION_CLEARANCE, maxImpactY);
-  }
+  best.y = bottomY;
+  return best;
+}
 
-  return Math.min(STATE.groundY - 28, maxImpactY);
+function configureFallMotion() {
+  const duration = FALL_DURATION_MS / 1000;
+  const distance = Math.max(1, STATE.fallStartY - STATE.fallImpactY);
+  const gravityDistance = 0.5 * FALL_GRAVITY * duration * duration;
+
+  STATE.fallAccelY = gravityDistance > distance
+    ? (2 * distance) / (duration * duration)
+    : FALL_GRAVITY;
+
+  STATE.fallVel.y = (STATE.fallImpactY - STATE.fallStartY + 0.5 * STATE.fallAccelY * duration * duration) / duration;
+  if (STATE.fallVel.y > 0) {
+    STATE.fallVel.y = 0;
+    STATE.fallAccelY = (2 * distance) / (duration * duration);
+  }
 }
 
 function settleFall(t) {
@@ -2074,8 +2112,10 @@ function settleFall(t) {
   STATE.fallLanded = true;
   STATE.fallLandTime = t;
   STATE.fallVel.set(0, 0, 0);
-  const impactY = Number.isFinite(STATE.fallImpactY) ? STATE.fallImpactY : fallImpactY(STATE.player.pos);
-  STATE.player.pos.y = Math.max(STATE.player.pos.y, impactY);
+  const impactY = Number.isFinite(STATE.fallImpactY) ? STATE.fallImpactY : fallImpactY();
+  STATE.player.pos.y = impactY;
+  STATE.player.pos.x = STATE.fallTargetPos.x;
+  STATE.player.pos.z = STATE.fallTargetPos.z;
 }
 
 function showFallResult() {
@@ -2101,16 +2141,19 @@ function triggerFall() {
   setDangerWarning(0);
   STATE.fallStart = performance.now();
   STATE.fallLandTime = 0;
+  STATE.fallStartPos.copy(STATE.player.pos);
   STATE.fallStartY = STATE.player.pos.y;
-  STATE.fallImpactY = fallImpactY(STATE.player.pos);
+  STATE.fallImpactY = fallImpactY();
+  STATE.fallTargetPos.copy(findClearFallTarget(STATE.player.pos));
   STATE.fallCameraYaw = STATE.player.yaw;
   STATE.fallCameraPitch = THREE.MathUtils.clamp(STATE.player.pitch - 0.1, -0.95, 0.65);
   STATE.fallCameraRoll = 0;
   STATE.fallVel.set(
-    (Math.random() - 0.5) * 0.28,
-    FALL_INITIAL_SPEED,
-    (Math.random() - 0.5) * 0.28,
+    0,
+    0,
+    0,
   );
+  configureFallMotion();
 
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 }
@@ -2212,14 +2255,19 @@ function animate() {
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   } else {
     if (!STATE.fallLanded) {
-      const fallDt = dt * FALL_TIME_SCALE;
-      STATE.fallVel.y -= FALL_GRAVITY * fallDt;
-      STATE.player.pos.addScaledVector(STATE.fallVel, fallDt);
-      STATE.fallImpactY = fallImpactY(STATE.player.pos);
+      const elapsed = Math.min((t - STATE.fallStart) / 1000, FALL_DURATION_MS / 1000);
+      const driftRaw = THREE.MathUtils.clamp(elapsed / 1.4, 0, 1);
+      const drift = driftRaw * driftRaw * (3 - 2 * driftRaw);
+      STATE.player.pos.x = THREE.MathUtils.lerp(STATE.fallStartPos.x, STATE.fallTargetPos.x, drift);
+      STATE.player.pos.z = THREE.MathUtils.lerp(STATE.fallStartPos.z, STATE.fallTargetPos.z, drift);
+      STATE.player.pos.y =
+        STATE.fallStartY +
+        STATE.fallVel.y * elapsed -
+        0.5 * STATE.fallAccelY * elapsed * elapsed;
 
       if (
         STATE.player.pos.y <= STATE.fallImpactY ||
-        t - STATE.fallStart >= FALL_FAILSAFE_MS
+        t - STATE.fallStart >= FALL_DURATION_MS
       ) {
         settleFall(t);
       }
