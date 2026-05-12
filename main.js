@@ -2132,7 +2132,7 @@ function animate() {
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   } else {
     STATE.fallVel.y -= 12 * dt;
-    STATE.player.pos.addScaledVector(STATE.fallVel, dt * 3);
+    STATE.player.pos.addScaledVector(STATE.fallVel, dt * 1);
     camera.position.copy(STATE.player.pos);
     camera.position.y += PLAYER_EYE;
     camera.rotation.x -= dt * 0.6;
