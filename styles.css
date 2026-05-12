@@ -164,7 +164,10 @@ canvas#scene {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 32px;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 24px);
   background: rgba(10, 16, 28, 0.55);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -180,7 +183,8 @@ canvas#scene {
 #hud-top .sep { opacity: 0.4; margin: 0 4px; }
 #step-number, #altitude { color: #ffffff; font-weight: 600; }
 #question-score { color: #ffffff; font-weight: 600; }
-#diary-btn {
+#diary-btn,
+#pause-btn {
   pointer-events: auto;
   border: 1px solid rgba(145, 255, 216, 0.32);
   border-radius: 8px;
@@ -193,7 +197,8 @@ canvas#scene {
   text-transform: uppercase;
   padding: 6px 10px;
 }
-#diary-btn:hover {
+#diary-btn:hover,
+#pause-btn:hover {
   border-color: rgba(145, 255, 216, 0.72);
   background: rgba(20, 44, 48, 0.68);
 }
@@ -300,7 +305,7 @@ canvas#scene {
 }
 
 /* ---------- INTRO / GAMEOVER ---------- */
-#intro, #gameover, #diary {
+#intro, #gameover, #diary, #pause-menu {
   position: fixed;
   inset: 0;
   display: flex;
@@ -623,6 +628,15 @@ canvas#scene {
 }
 .card button:hover { filter: brightness(1.15); }
 .card button:active { transform: scale(0.97); }
+.pause-card {
+  width: min(480px, 90vw);
+}
+.card button.secondary-card-btn {
+  background: rgba(7, 10, 16, 0.66);
+  color: #c9d4e5;
+  border-color: rgba(255, 255, 255, 0.16);
+  margin-left: 10px;
+}
 .diary-card {
   width: min(760px, 92vw);
   max-height: min(760px, 86vh);
@@ -705,6 +719,9 @@ canvas#scene {
   .menu-actions button {
     width: 100%;
     min-height: 52px;
+  }
+  .card button.secondary-card-btn {
+    margin-left: 0;
   }
 }
 

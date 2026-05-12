@@ -22,6 +22,7 @@ const TILE_GAP = 0.04;
 const TILE_NEON_COLOR = 0x70f6ff;
 const BRIDGE_COLS = 3;
 const BRIDGE_ROWS = 7;
+const GRAMMAR_SLOT_COUNT = BRIDGE_COLS;
 const PLATFORM_SIZE = 9.5;
 const MOUSE_SENS = 0.0022;
 const STEP_MOVE_MS = 460;
@@ -29,10 +30,18 @@ const MOVE_DIRECTION_MIN_DOT = 0.2;
 const FRAGILE_BASE_SECONDS = 8;
 const FRAGILE_EXTRA_MIN_SECONDS = 1;
 const FRAGILE_EXTRA_MAX_SECONDS = 6;
-const FALL_DURATION_MS = 2400;
+const FALL_GRAVITY = 9.81;
+const FALL_TIME_SCALE = 0.72;
+const FALL_INITIAL_SPEED = -0.85;
+const FALL_COLLISION_CLEARANCE = 1.15;
+const FALL_MIN_DROP = 24;
+const FALL_CAMERA_UP_PITCH = 1.18;
+const FALL_DIARY_DELAY_MS = 650;
+const FALL_FAILSAFE_MS = 6200;
 const CITY_TARGET_TOP_Y = 60;
-const PLATFORM_Y = 32;
+const PLATFORM_Y = 86;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const WORLD_DOWN = new THREE.Vector3(0, -1, 0);
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -111,6 +120,7 @@ pmrem.dispose();
 // ====================================================================
 const STATE = {
   cityRoot: null,
+  cityBounds: null,
   bridgeGroup: null,
   startPlatform: null,
   targetPlatform: null,
@@ -146,6 +156,7 @@ const STATE = {
   questionsAnswered: 0,
   questionsCorrect: 0,
   diaryEntries: [],
+  diaryForced: false,
   playerCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
   moving: false,
   moveStart: 0,
@@ -157,9 +168,19 @@ const STATE = {
   intro: true,
   active: false,
   falling: false,
+  fallLanded: false,
+  fallDiaryShown: false,
+  fallCameraYaw: 0,
+  fallCameraPitch: 0,
+  fallCameraRoll: 0,
+  fallImpactY: null,
+  fallStartY: 0,
   won: false,
   fallVel: new THREE.Vector3(),
   fallStart: 0,
+  fallLandTime: 0,
+  paused: false,
+  returningFromSettings: false,
 
   aviationLights: [],
 };
@@ -240,6 +261,8 @@ function mountCity(cityRoot) {
   }
   STATE.cityRoot = cityRoot;
   scene.add(cityRoot);
+  cityRoot.updateMatrixWorld(true);
+  STATE.cityBounds = new THREE.Box3().setFromObject(cityRoot);
 }
 
 function bootScene() {
@@ -826,7 +849,7 @@ function initStaticScene() {
   resetPlayer();
 }
 
-function softRestart() {
+function rebuildRun() {
   if (STATE.bridgeGroup) {
     scene.remove(STATE.bridgeGroup);
     disposeObject(STATE.bridgeGroup);
@@ -836,11 +859,21 @@ function softRestart() {
   scene.add(STATE.bridgeGroup);
 
   STATE.falling = false;
+  STATE.fallLanded = false;
+  STATE.fallDiaryShown = false;
+  STATE.fallImpactY = null;
+  STATE.fallStartY = 0;
+  STATE.fallLandTime = 0;
   STATE.won = false;
   STATE.fallVel.set(0, 0, 0);
 
   resetPlayer();
+}
+
+function softRestart() {
+  rebuildRun();
   gameoverEl.classList.add('hidden');
+  diaryEl?.classList.add('hidden');
   enterPlay();
 }
 
@@ -949,6 +982,10 @@ const endText = document.getElementById('endtext');
 const restartBtn = document.getElementById('restart');
 const dangerWarning = document.getElementById('danger-warning');
 const moveControls = document.getElementById('move-controls');
+const pauseBtn = document.getElementById('pause-btn');
+const pauseMenuEl = document.getElementById('pause-menu');
+const resumeBtn = document.getElementById('resume-btn');
+const settingsBtn = document.getElementById('settings-btn');
 const diaryEl = document.getElementById('diary');
 const diaryBtn = document.getElementById('diary-btn');
 const diaryCloseBtn = document.getElementById('diary-close');
@@ -959,15 +996,15 @@ if (timerLabel) timerLabel.textContent = '';
 if (hintEl) hintEl.textContent = 'Ответ откроет следующий шаг. Время стекла не показывается.';
 
 const questionBank = new QuestionBank();
-const MENU_STATE_KEY = 'nad_gorizontom_flammen_dashboard_v1';
+const MENU_STATE_KEY = 'nad_gorizontom_flammen_dashboard_v2_columns';
 const DIFFICULTIES = [
   { id: 'easy', title: 'Лёгкий', desc: 'больше времени' },
   { id: 'medium', title: 'Средний', desc: 'обычный темп' },
   { id: 'hard', title: 'Трудный', desc: 'нервное стекло' },
 ];
-const RITUAL_SLOTS = Array.from({ length: BRIDGE_ROWS }, (_, index) => ({
-  title: `Ряд ${index + 1}`,
-  role: `Стекло ${index + 1}`,
+const RITUAL_SLOTS = ['Левая дорожка', 'Средняя дорожка', 'Правая дорожка'].map((title, index) => ({
+  title,
+  role: `Столбец ${index + 1}`,
 }));
 
 function isWortstellungTopic(grammarTopic) {
@@ -993,7 +1030,7 @@ const dashboard = {
   selectedLexical: null,
   selectedGrammar: null,
   selectedSlotIndex: null,
-  slotAssignments: Array(BRIDGE_ROWS).fill(null),
+  slotAssignments: Array(GRAMMAR_SLOT_COUNT).fill(null),
 
   bind() {
     this.loadState();
@@ -1026,7 +1063,7 @@ const dashboard = {
       }
       if (LEXICAL_TOPICS.includes(state.selectedLexical)) this.selectedLexical = state.selectedLexical;
       if (Array.isArray(state.slotAssignments)) {
-        this.slotAssignments = Array.from({ length: BRIDGE_ROWS }, (_, index) => {
+        this.slotAssignments = Array.from({ length: GRAMMAR_SLOT_COUNT }, (_, index) => {
           const topic = state.slotAssignments[index];
           return GRAMMAR_TOPICS.includes(topic) ? topic : null;
         });
@@ -1159,7 +1196,7 @@ const dashboard = {
       button.innerHTML =
         `<div class="slot-bonus">${slot.role}</div>` +
         `<div class="slot-topic">${grammar || slot.title}</div>` +
-        `<div class="slot-grammar">${grammar ? 'тема вопроса для этого ряда' : 'выберите грамматику для ряда'}</div>`;
+        `<div class="slot-grammar">${grammar ? 'эта дорожка будет спрашивать об этом' : 'назначь грамматику этой дорожке'}</div>`;
       button.addEventListener('click', () => {
         if (this.selectedGrammar) {
           this.assignGrammarToSlot(index, this.selectedGrammar);
@@ -1246,7 +1283,7 @@ const dashboard = {
     if (!this.ready || !this.isComplete()) {
       if (this.startStatus) {
         this.startStatus.textContent = this.ready
-          ? 'Заполните все ряды перед стартом.'
+          ? 'Заполни все три дорожки перед стартом.'
           : 'Сцена загружается...';
       }
       return;
@@ -1254,7 +1291,8 @@ const dashboard = {
 
     STATE.questionSettings = this.getSettings();
     questionBank.configure(STATE.questionSettings);
-    enterPlay();
+    enterPlay({ resetRun: STATE.returningFromSettings });
+    STATE.returningFromSettings = false;
   },
 };
 
@@ -1319,30 +1357,41 @@ function recordQuestionOutcome(question, correct) {
   updateHudProgress();
 }
 
-function renderDiary() {
+function renderDiary(afterFall = false) {
   if (!diaryListEl) return;
 
   if (!STATE.diaryEntries.length) {
-    diaryListEl.innerHTML = '<div class="diary-empty">Пока нет отвеченных вопросов.</div>';
+    diaryListEl.innerHTML = afterFall
+      ? '<div class="diary-empty">Страницы молчат: мост оборвал путь раньше, чем ответ успел стать записью.</div>'
+      : '<div class="diary-empty">Пока нет отвеченных вопросов.</div>';
     return;
   }
 
   diaryListEl.innerHTML = STATE.diaryEntries.map((entry, index) => (
     `<article class="diary-entry">` +
-    `<div class="diary-meta">${index + 1}. ${entry.correct ? 'верно' : 'ошибка'} - ${escapeHtml(entry.topic)} - ${escapeHtml(entry.level)} - ${escapeHtml(entry.lexicalTopic)}</div>` +
+    `<div class="diary-meta">${index + 1}. ${entry.correct ? 'стекло выдержало' : 'трещина запомнила'} · ${escapeHtml(entry.topic)} · ${escapeHtml(entry.level)} · ${escapeHtml(entry.lexicalTopic)}</div>` +
     `<div class="diary-text">${escapeHtml(entry.text || 'Вопрос')}</div>` +
     `<div class="diary-display">${escapeHtml(entry.display)}</div>` +
     `</article>`
   )).join('');
 }
 
-function showDiary() {
-  renderDiary();
+function showDiary(options = {}) {
+  const afterFall = Boolean(options.afterFall);
+  STATE.diaryForced = afterFall;
+  renderDiary(afterFall);
+  diaryEl?.classList.toggle('diary-forced', afterFall);
+  if (diaryCloseBtn) diaryCloseBtn.textContent = afterFall ? 'Продолжить' : 'Закрыть';
   diaryEl?.classList.remove('hidden');
 }
 
 function hideDiary() {
+  const wasForced = STATE.diaryForced;
+  STATE.diaryForced = false;
+  diaryEl?.classList.remove('diary-forced');
+  if (diaryCloseBtn) diaryCloseBtn.textContent = 'Закрыть';
   diaryEl?.classList.add('hidden');
+  if (wasForced) showFallResult();
 }
 
 function setOptionsDisabled(disabled) {
@@ -1362,8 +1411,8 @@ function clearQuestion() {
 
 function getCurrentQuestionSlot() {
   const slots = STATE.questionSettings?.grammarSlots;
-  if (!Array.isArray(slots) || STATE.playerCell.row < 0) return null;
-  return slots[STATE.playerCell.row] || null;
+  if (!Array.isArray(slots) || !slots.length || STATE.playerCell.row < 0) return null;
+  return slots[STATE.playerCell.col] || slots[STATE.playerCell.col % slots.length] || null;
 }
 
 function normalizeBridgeQuestion(rawQuestion) {
@@ -1389,11 +1438,11 @@ function showQuestionLoading(slot) {
   STATE.questionLocked = true;
   STATE.currentQuestion = null;
   questionEl.textContent = slot?.grammarTopic
-    ? `Готовим вопрос: ${slot.grammarTopic}`
-    : 'Готовим вопрос...';
-  optionsEl.innerHTML = '<div class="option option-loading">Генератор подбирает четыре варианта...</div>';
+    ? `Стекло вспоминает ${slot.grammarTopic}`
+    : 'Стекло прислушивается...';
+  optionsEl.innerHTML = '<div class="option option-loading">Город достаёт из темноты четыре ответа...</div>';
   if (hintEl) {
-    hintEl.textContent = 'AI-генерация включится при AITUNNEL_API_KEY; без ключа игра берёт fallback-вопросы Flammen.';
+    hintEl.textContent = 'Вопрос придёт из уже зажжённых огней, если они ещё помнят эту тему.';
   }
   quizEl.classList.remove('shake');
   quizEl.classList.remove('hidden');
@@ -1503,8 +1552,12 @@ function onAnswer(idx, button) {
   }, 620);
 }
 
-function enterPlay() {
+function enterPlay(options = {}) {
+  if (options.resetRun) rebuildRun();
   intro.classList.add('hidden');
+  pauseMenuEl?.classList.add('hidden');
+  gameoverEl.classList.add('hidden');
+  diaryEl?.classList.add('hidden');
   hud.classList.remove('hidden');
   moveControls?.classList.remove('hidden');
   moveControls?.classList.remove('locked');
@@ -1516,8 +1569,14 @@ function enterPlay() {
   STATE.questionsAnswered = 0;
   STATE.questionsCorrect = 0;
   STATE.diaryEntries = [];
+  STATE.diaryForced = false;
   STATE.intro = false;
   STATE.active = true;
+  STATE.paused = false;
+  STATE.falling = false;
+  STATE.fallLanded = false;
+  STATE.fallDiaryShown = false;
+  STATE.fallStartY = 0;
   setDangerWarning(0);
   updateHudProgress();
 }
@@ -1526,9 +1585,12 @@ function showIntro() {
   stepTotal.textContent = String(BRIDGE_ROWS);
   stepNumber.textContent = '0';
   intro.classList.remove('hidden');
+  hud.classList.add('hidden');
+  pauseMenuEl?.classList.add('hidden');
   dashboard.setReady(true);
   STATE.intro = true;
   STATE.active = false;
+  STATE.paused = false;
   STATE.currentQuestion = null;
   STATE.questionLoading = false;
   STATE.questionLocked = false;
@@ -1538,6 +1600,43 @@ function showIntro() {
   setDangerWarning(0);
 }
 
+function pauseGame() {
+  if (!STATE.active || STATE.falling || STATE.won || STATE.paused) return;
+  STATE.paused = true;
+  STATE.cameraDragging = false;
+  pauseMenuEl?.classList.remove('hidden');
+  moveControls?.classList.add('locked');
+  if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+}
+
+function resumeGame() {
+  if (!STATE.paused) return;
+  STATE.paused = false;
+  STATE.active = true;
+  pauseMenuEl?.classList.add('hidden');
+  if (!STATE.currentQuestion && !STATE.questionLoading) {
+    moveControls?.classList.remove('locked');
+  }
+}
+
+function openSettingsFromPause() {
+  if (!STATE.paused) return;
+  STATE.paused = false;
+  STATE.active = false;
+  STATE.returningFromSettings = true;
+  pauseMenuEl?.classList.add('hidden');
+  hud.classList.add('hidden');
+  moveControls?.classList.add('hidden');
+  moveControls?.classList.remove('locked');
+  quizEl.classList.add('hidden');
+  if (STATE.currentQuestion?.meta?.generated && !STATE.questionLocked) {
+    questionBank.returnQuestion(STATE.currentQuestion.meta);
+  }
+  clearQuestion();
+  dashboard.showStep(4);
+  intro.classList.remove('hidden');
+}
+
 restartBtn.addEventListener('click', () => {
   softRestart();
 });
@@ -1545,14 +1644,17 @@ restartBtn.addEventListener('click', () => {
 diaryBtn?.addEventListener('click', showDiary);
 diaryCloseBtn?.addEventListener('click', hideDiary);
 diaryEl?.addEventListener('click', (event) => {
-  if (event.target === diaryEl) hideDiary();
+  if (event.target === diaryEl && !STATE.diaryForced) hideDiary();
 });
+pauseBtn?.addEventListener('click', pauseGame);
+resumeBtn?.addEventListener('click', resumeGame);
+settingsBtn?.addEventListener('click', openSettingsFromPause);
 
 // ====================================================================
 // INPUT
 // ====================================================================
 canvas.addEventListener('pointerdown', (e) => {
-  if (!STATE.active || STATE.falling || STATE.won) return;
+  if (!STATE.active || STATE.paused || STATE.falling || STATE.won) return;
   STATE.cameraDragging = true;
   canvas.setPointerCapture?.(e.pointerId);
 });
@@ -1566,6 +1668,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('mousemove', (e) => {
+  if (STATE.paused) return;
   if (!STATE.pointerLocked && !STATE.cameraDragging) return;
   STATE.player.yaw -= e.movementX * MOUSE_SENS;
   STATE.player.pitch -= e.movementY * MOUSE_SENS;
@@ -1584,6 +1687,13 @@ const keyMoves = new Map([
 ]);
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') {
+    e.preventDefault();
+    if (STATE.diaryForced) return;
+    if (STATE.paused) resumeGame();
+    else pauseGame();
+    return;
+  }
   const command = keyMoves.get(e.code);
   if (!command) return;
   e.preventDefault();
@@ -1785,7 +1895,7 @@ function startMoveToCell(row, col) {
 }
 
 function requestMove(command) {
-  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
+  if (!STATE.active || STATE.paused || STATE.falling || STATE.won || STATE.moving) return;
   if (STATE.currentQuestion || STATE.questionLoading) return;
 
   const target = cameraRelativeTargetCell(command);
@@ -1859,7 +1969,7 @@ function unusedOldQuestionTimerUpdate(t) {
 }
 
 function updateMovementGame(t) {
-  if (STATE.falling || STATE.won || !STATE.active) {
+  if (STATE.falling || STATE.won || STATE.paused || !STATE.active) {
     setDangerWarning(0);
     return;
   }
@@ -1921,31 +2031,88 @@ function onWin() {
   gameoverEl.classList.remove('hidden');
 }
 
+const fallRaycaster = new THREE.Raycaster();
+
+function citySurfaceYBelow(pos) {
+  if (!STATE.cityRoot || !STATE.cityBounds) return null;
+
+  const rayStartY = Math.max(pos.y + 6, STATE.cityBounds.max.y + 80);
+  fallRaycaster.ray.origin.set(pos.x, rayStartY, pos.z);
+  fallRaycaster.ray.direction.copy(WORLD_DOWN);
+
+  const hits = fallRaycaster.intersectObject(STATE.cityRoot, true);
+  const highestAllowedSurfaceY = Number.isFinite(STATE.fallStartY)
+    ? STATE.fallStartY - FALL_MIN_DROP
+    : pos.y + 0.2;
+  const surfaceCeiling = Math.min(pos.y + 0.2, highestAllowedSurfaceY);
+  const surface = hits.find((hit) => hit.point.y <= surfaceCeiling);
+  return surface ? surface.point.y : null;
+}
+
+function fallImpactY(pos) {
+  const maxImpactY = Number.isFinite(STATE.fallStartY)
+    ? STATE.fallStartY - FALL_MIN_DROP
+    : Infinity;
+  const surfaceY = citySurfaceYBelow(pos);
+  if (Number.isFinite(surfaceY)) {
+    return Math.min(surfaceY + FALL_COLLISION_CLEARANCE, maxImpactY);
+  }
+
+  if (STATE.cityBounds) {
+    const minDropSurfaceY = Number.isFinite(STATE.fallStartY)
+      ? STATE.fallStartY - FALL_MIN_DROP - FALL_COLLISION_CLEARANCE
+      : STATE.groundY - 5;
+    const skylineY = Math.min(STATE.groundY - 5, STATE.cityBounds.max.y - 0.8, minDropSurfaceY);
+    return Math.min(skylineY + FALL_COLLISION_CLEARANCE, maxImpactY);
+  }
+
+  return Math.min(STATE.groundY - 28, maxImpactY);
+}
+
+function settleFall(t) {
+  if (STATE.fallLanded) return;
+  STATE.fallLanded = true;
+  STATE.fallLandTime = t;
+  STATE.fallVel.set(0, 0, 0);
+  const impactY = Number.isFinite(STATE.fallImpactY) ? STATE.fallImpactY : fallImpactY(STATE.player.pos);
+  STATE.player.pos.y = Math.max(STATE.player.pos.y, impactY);
+}
+
+function showFallResult() {
+  endTitle.textContent = 'Ты упал';
+  endText.textContent = 'Стекло отпустило. Город остался внизу, а записи уже открыты на нужной странице.';
+  gameoverEl.classList.remove('hidden');
+}
+
 function triggerFall() {
   if (STATE.falling) return;
   STATE.falling = true;
   STATE.active = false;
+  STATE.paused = false;
   STATE.moving = false;
   STATE.currentQuestion = null;
   STATE.questionLoading = false;
   STATE.questionRequestToken++;
+  STATE.fallLanded = false;
+  STATE.fallDiaryShown = false;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
+  pauseMenuEl?.classList.add('hidden');
   setDangerWarning(0);
   STATE.fallStart = performance.now();
+  STATE.fallLandTime = 0;
+  STATE.fallStartY = STATE.player.pos.y;
+  STATE.fallImpactY = fallImpactY(STATE.player.pos);
+  STATE.fallCameraYaw = STATE.player.yaw;
+  STATE.fallCameraPitch = THREE.MathUtils.clamp(STATE.player.pitch - 0.1, -0.95, 0.65);
+  STATE.fallCameraRoll = 0;
   STATE.fallVel.set(
-    (Math.random() - 0.5) * 0.4,
-    -2.4,
-    (Math.random() - 0.5) * 0.4,
+    (Math.random() - 0.5) * 0.28,
+    FALL_INITIAL_SPEED,
+    (Math.random() - 0.5) * 0.28,
   );
 
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
-
-  setTimeout(() => {
-    endTitle.textContent = 'Ты упал';
-    endText.textContent = 'Стекло не выдержало. Город принял тебя.';
-    gameoverEl.classList.remove('hidden');
-  }, FALL_DURATION_MS);
 }
 
 // ====================================================================
@@ -1976,7 +2143,7 @@ function animate() {
     const tile = STATE.tiles[i];
     const meta = STATE.tileMeta[i];
 
-    if (meta.triggered && meta.fragile && !meta.broken) {
+    if (STATE.active && !STATE.paused && meta.triggered && meta.fragile && !meta.broken) {
       const elapsed = t - meta.triggerTime;
       const duration = meta.dangerDuration || randomFragileDurationMs();
       meta.dangerDuration = duration;
@@ -2044,12 +2211,43 @@ function animate() {
     camera.lookAt(camera.position.clone().add(lookDir));
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   } else {
-    STATE.fallVel.y -= 12 * dt;
-    STATE.player.pos.addScaledVector(STATE.fallVel, dt * 6);
+    if (!STATE.fallLanded) {
+      const fallDt = dt * FALL_TIME_SCALE;
+      STATE.fallVel.y -= FALL_GRAVITY * fallDt;
+      STATE.player.pos.addScaledVector(STATE.fallVel, fallDt);
+      STATE.fallImpactY = fallImpactY(STATE.player.pos);
+
+      if (
+        STATE.player.pos.y <= STATE.fallImpactY ||
+        t - STATE.fallStart >= FALL_FAILSAFE_MS
+      ) {
+        settleFall(t);
+      }
+    } else if (!STATE.fallDiaryShown && t - STATE.fallLandTime >= FALL_DIARY_DELAY_MS) {
+      STATE.fallDiaryShown = true;
+      showDiary({ afterFall: true });
+    }
+
+    const pitchTarget = STATE.fallLanded
+      ? FALL_CAMERA_UP_PITCH
+      : Math.max(-0.8, STATE.fallCameraPitch - dt * 0.08);
+    const pitchEase = 1 - Math.exp(-dt * (STATE.fallLanded ? 3.6 : 0.9));
+    STATE.fallCameraPitch = THREE.MathUtils.lerp(STATE.fallCameraPitch, pitchTarget, pitchEase);
+    STATE.fallCameraRoll = THREE.MathUtils.lerp(
+      STATE.fallCameraRoll,
+      STATE.fallLanded ? 0 : 0.18,
+      1 - Math.exp(-dt * 1.4),
+    );
+
     camera.position.copy(STATE.player.pos);
     camera.position.y += PLAYER_EYE;
-    camera.rotation.x -= dt * 0.6;
-    camera.rotation.z += dt * 0.25;
+    const lookDir = new THREE.Vector3(
+      -Math.sin(STATE.fallCameraYaw) * Math.cos(STATE.fallCameraPitch),
+      Math.sin(STATE.fallCameraPitch),
+      -Math.cos(STATE.fallCameraYaw) * Math.cos(STATE.fallCameraPitch),
+    );
+    camera.lookAt(camera.position.clone().add(lookDir));
+    camera.rotateZ(STATE.fallCameraRoll);
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   }
 

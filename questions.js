@@ -366,16 +366,13 @@ export class QuestionBank {
 
         this.level = nextLevel;
         this.lexicalTopic = nextLexicalTopic;
-        this.fallbackCursor = 0;
         this.grammarCursor = 0;
         this.selectedSlots = nextSlots;
         this.poolSignature = nextSignature;
 
         if (!samePoolConfig) {
+            this.fallbackCursor = 0;
             this.fallbackPool = shuffle(QUESTION_POOL);
-            this.questionPool = Object.create(null);
-            this.fetching = Object.create(null);
-            this.usedDisplays = Object.create(null);
         }
     }
 

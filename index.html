@@ -55,7 +55,7 @@ window.addEventListener('error', function (event) {
 <div id="hud" class="hidden">
   <div id="hud-top">
     <div id="progress">
-      <span class="label">Ряд</span>
+      <span class="label">Шаг</span>
       <span id="step-number">0</span>
       <span class="sep">/</span>
       <span id="step-total">7</span>
@@ -69,6 +69,7 @@ window.addEventListener('error', function (event) {
       <span id="question-score">0/0</span>
     </div>
     <button id="diary-btn" type="button">Дневник</button>
+    <button id="pause-btn" type="button">Пауза</button>
   </div>
 
   <div id="quiz" class="hidden">
@@ -88,6 +89,15 @@ window.addEventListener('error', function (event) {
   </div>
 </div>
 
+<div id="pause-menu" class="hidden">
+  <div class="card pause-card">
+    <h1>Пауза</h1>
+    <p>Город ждёт под стеклом. Можно отдышаться или вернуться к настройкам перед новым проходом.</p>
+    <button id="resume-btn" type="button">Продолжить</button>
+    <button id="settings-btn" class="secondary-card-btn" type="button">К настройкам</button>
+  </div>
+</div>
+
 <div id="diary" class="hidden">
   <div class="card diary-card">
     <h1>Дневник вопросов</h1>
@@ -101,14 +111,14 @@ window.addEventListener('error', function (event) {
     <div class="menu-kicker">Nad Gorizontom / Lernlauf</div>
     <h1 class="title">Над горизонтом</h1>
     <p class="subtitle">
-      Настрой забег как в Flammen: имя, уровень немецкого, лексику и грамматическую тему для каждого ряда моста.
+      Настрой забег как в Flammen: имя, уровень немецкого, лексику и грамматическую тему для каждой дорожки моста.
     </p>
 
     <div class="setup-progress">
       <div class="progress-step active" data-progress-step="1">1. Имя</div>
       <div class="progress-step" data-progress-step="2">2. Уровень</div>
       <div class="progress-step" data-progress-step="3">3. Лексика</div>
-      <div class="progress-step" data-progress-step="4">4. Ряды</div>
+      <div class="progress-step" data-progress-step="4">4. Дорожки</div>
     </div>
 
     <div id="setup-step1" class="setup-step">
@@ -126,7 +136,7 @@ window.addEventListener('error', function (event) {
 
     <div id="setup-step2" class="setup-step hidden">
       <h2 class="step-title">Уровень и сложность</h2>
-      <p class="step-hint">Уровень ограничивает грамматику и словарь генерируемых упражнений.</p>
+      <p class="step-hint">Уровень держит вопросы в пределах твоего немецкого и не пускает мост слишком далеко вперёд.</p>
       <div id="level-buttons" class="level-buttons"></div>
       <div id="difficulty-buttons" class="difficulty-buttons"></div>
       <div class="menu-actions">
@@ -136,7 +146,7 @@ window.addEventListener('error', function (event) {
 
     <div id="setup-step3" class="setup-step hidden">
       <h2 class="step-title">Лексика забега</h2>
-      <p class="step-hint">Генератор будет держаться выбранной тематической области.</p>
+      <p class="step-hint">Вопросы будут держаться выбранной тематической области.</p>
       <div id="lexical-grid" class="lexical-grid"></div>
       <div class="menu-actions">
         <button id="back-to-step2" class="btn-secondary" type="button">Назад</button>
@@ -144,8 +154,8 @@ window.addEventListener('error', function (event) {
     </div>
 
     <div id="setup-step4" class="setup-step hidden">
-      <h2 class="step-title">Грамматика по рядам</h2>
-      <p class="step-hint">Выбери тему и нажми на ряд моста. Все ряды должны получить тему перед стартом.</p>
+      <h2 class="step-title">Грамматика по дорожкам</h2>
+      <p class="step-hint">Выбери тему и нажми на одну из трёх дорожек. Каждая линия моста должна знать свой вопрос перед стартом.</p>
       <div id="ritual-slots" class="ritual-slots"></div>
       <div id="grammar-picker" class="grammar-picker"></div>
       <div class="menu-actions">
@@ -168,6 +178,6 @@ window.addEventListener('error', function (event) {
   </div>
 </div>
 
-<script type="module" src="main.js?v=questions-and-low-roof"></script>
+<script type="module" src="main.js?v=columns-pause-fall-3"></script>
 </body>
 </html>
