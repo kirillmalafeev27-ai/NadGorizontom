@@ -2131,7 +2131,7 @@ function animate() {
     camera.lookAt(camera.position.clone().add(lookDir));
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   } else {
-    STATE.fallVel.y -= 12 * dt;
+    STATE.fallVel.y -= 6 * dt;
     STATE.player.pos.addScaledVector(STATE.fallVel, dt * 1);
     camera.position.copy(STATE.player.pos);
     camera.position.y += PLAYER_EYE;
