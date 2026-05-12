@@ -1378,12 +1378,17 @@ function setOptionsDisabled(disabled) {
   });
 }
 
+function setQuestionControlsOpen(isOpen) {
+  moveControls?.classList.toggle('question-open', isOpen);
+}
+
 function clearQuestion() {
   STATE.currentQuestion = null;
   STATE.questionLoading = false;
   STATE.questionLocked = false;
   STATE.questionRequestToken++;
   quizEl.classList.add('hidden');
+  setQuestionControlsOpen(false);
   moveControls?.classList.remove('locked');
 }
 
@@ -1424,6 +1429,7 @@ function showQuestionLoading(slot) {
   }
   quizEl.classList.remove('shake');
   quizEl.classList.remove('hidden');
+  setQuestionControlsOpen(true);
   moveControls?.classList.add('locked');
 }
 
@@ -1475,6 +1481,7 @@ async function startQuestion() {
 
   quizEl.classList.remove('shake');
   quizEl.classList.remove('hidden');
+  setQuestionControlsOpen(true);
   moveControls?.classList.add('locked');
 
   const idx = currentTileIndex();
@@ -1539,6 +1546,7 @@ function enterPlay(options = {}) {
   hud.classList.remove('hidden');
   moveControls?.classList.remove('hidden');
   moveControls?.classList.remove('locked');
+  setQuestionControlsOpen(false);
   quizEl.classList.add('hidden');
   STATE.currentQuestion = null;
   STATE.questionLoading = false;
@@ -1572,6 +1580,7 @@ function showIntro() {
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
   moveControls?.classList.remove('locked');
+  setQuestionControlsOpen(false);
   setDangerWarning(0);
 }
 
@@ -1604,6 +1613,7 @@ function openSettingsFromPause() {
   moveControls?.classList.add('hidden');
   moveControls?.classList.remove('locked');
   quizEl.classList.add('hidden');
+  setQuestionControlsOpen(false);
   if (STATE.currentQuestion?.meta?.generated && !STATE.questionLocked) {
     questionBank.returnQuestion(STATE.currentQuestion.meta);
   }
@@ -1998,6 +2008,7 @@ function onWin() {
   STATE.questionRequestToken++;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
+  setQuestionControlsOpen(false);
   setDangerWarning(0);
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 
@@ -2017,6 +2028,7 @@ function triggerFall() {
   STATE.questionRequestToken++;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
+  setQuestionControlsOpen(false);
   pauseMenuEl?.classList.add('hidden');
   setDangerWarning(0);
   STATE.fallStart = performance.now();
@@ -2131,8 +2143,8 @@ function animate() {
     camera.lookAt(camera.position.clone().add(lookDir));
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   } else {
-    STATE.fallVel.y -= 6 * dt;
-    STATE.player.pos.addScaledVector(STATE.fallVel, dt * 1);
+    STATE.fallVel.y -= 12 * dt;
+    STATE.player.pos.addScaledVector(STATE.fallVel, dt * 6);
     camera.position.copy(STATE.player.pos);
     camera.position.y += PLAYER_EYE;
     camera.rotation.x -= dt * 0.6;

@@ -65,6 +65,7 @@ canvas#scene {
   grid-template-rows: repeat(3, 54px);
   gap: 8px;
   pointer-events: auto;
+  transition: bottom 0.22s ease, transform 0.22s ease;
 }
 .move-btn {
   width: 54px;
@@ -89,6 +90,9 @@ canvas#scene {
 #move-controls.locked .move-btn {
   opacity: 0.42;
   cursor: default;
+}
+#move-controls.locked {
+  pointer-events: none;
 }
 .move-up { grid-column: 2; grid-row: 1; }
 .move-left { grid-column: 1; grid-row: 2; }
@@ -680,6 +684,10 @@ canvas#scene {
 }
 
 @media (max-width: 760px), (pointer: coarse) {
+  #move-controls.question-open {
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + clamp(220px, 34vh, 320px));
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + clamp(220px, 34dvh, 320px));
+  }
   #intro {
     padding: max(9px, env(safe-area-inset-top)) 0 max(9px, env(safe-area-inset-bottom));
   }
