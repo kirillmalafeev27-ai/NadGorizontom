@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const { handleGenerateQuestions } = require('./question-api');
 
 const DEFAULT_PORT = 3000;
 const ROOT = __dirname;
@@ -88,6 +89,14 @@ function createServer(root = ROOT) {
   return http.createServer((req, res) => {
     if (req.url === '/healthz') {
       sendText(res, 200, 'ok');
+      return;
+    }
+
+    if ((req.url || '').split('?')[0] === '/api/generate-questions') {
+      handleGenerateQuestions(req, res).catch((err) => {
+        console.error('Question generation endpoint failed', err);
+        sendText(res, 500, 'internal server error');
+      });
       return;
     }
 

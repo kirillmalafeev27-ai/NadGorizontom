@@ -64,6 +64,11 @@ window.addEventListener('error', function (event) {
       <span class="label">Высота</span>
       <span id="altitude">— м</span>
     </div>
+    <div id="score">
+      <span class="label">Ответы</span>
+      <span id="question-score">0/0</span>
+    </div>
+    <button id="diary-btn" type="button">Дневник</button>
   </div>
 
   <div id="quiz" class="hidden">
@@ -83,7 +88,72 @@ window.addEventListener('error', function (event) {
   </div>
 </div>
 
+<div id="diary" class="hidden">
+  <div class="card diary-card">
+    <h1>Дневник вопросов</h1>
+    <div id="diary-list"></div>
+    <button id="diary-close" type="button">Закрыть</button>
+  </div>
+</div>
+
 <div id="intro" class="hidden">
+  <div class="dashboard-shell">
+    <div class="menu-kicker">Nad Gorizontom / Lernlauf</div>
+    <h1 class="title">Над горизонтом</h1>
+    <p class="subtitle">
+      Настрой забег как в Flammen: имя, уровень немецкого, лексику и грамматическую тему для каждого ряда моста.
+    </p>
+
+    <div class="setup-progress">
+      <div class="progress-step active" data-progress-step="1">1. Имя</div>
+      <div class="progress-step" data-progress-step="2">2. Уровень</div>
+      <div class="progress-step" data-progress-step="3">3. Лексика</div>
+      <div class="progress-step" data-progress-step="4">4. Ряды</div>
+    </div>
+
+    <div id="setup-step1" class="setup-step">
+      <h2 class="step-title">Кто выходит на мост</h2>
+      <p class="step-hint">Имя хранится локально и нужно только для этого забега.</p>
+      <div class="field">
+        <label for="player-name">Игрок</label>
+        <input id="player-name" maxlength="20" placeholder="Spieler" autocomplete="off" />
+      </div>
+      <div class="menu-actions">
+        <button id="to-step2-btn" class="btn-primary" type="button">Дальше</button>
+        <span id="start-status">Сцена загружается...</span>
+      </div>
+    </div>
+
+    <div id="setup-step2" class="setup-step hidden">
+      <h2 class="step-title">Уровень и сложность</h2>
+      <p class="step-hint">Уровень ограничивает грамматику и словарь генерируемых упражнений.</p>
+      <div id="level-buttons" class="level-buttons"></div>
+      <div id="difficulty-buttons" class="difficulty-buttons"></div>
+      <div class="menu-actions">
+        <button id="back-to-step1" class="btn-secondary" type="button">Назад</button>
+      </div>
+    </div>
+
+    <div id="setup-step3" class="setup-step hidden">
+      <h2 class="step-title">Лексика забега</h2>
+      <p class="step-hint">Генератор будет держаться выбранной тематической области.</p>
+      <div id="lexical-grid" class="lexical-grid"></div>
+      <div class="menu-actions">
+        <button id="back-to-step2" class="btn-secondary" type="button">Назад</button>
+      </div>
+    </div>
+
+    <div id="setup-step4" class="setup-step hidden">
+      <h2 class="step-title">Грамматика по рядам</h2>
+      <p class="step-hint">Выбери тему и нажми на ряд моста. Все ряды должны получить тему перед стартом.</p>
+      <div id="ritual-slots" class="ritual-slots"></div>
+      <div id="grammar-picker" class="grammar-picker"></div>
+      <div class="menu-actions">
+        <button id="start-btn" type="button" disabled>Начать путь</button>
+        <button id="back-to-step3" class="btn-secondary" type="button">Назад</button>
+      </div>
+    </div>
+  </div>
   <div class="card">
     <h1>Über den Wolken</h1>
     <p>
@@ -94,7 +164,7 @@ window.addEventListener('error', function (event) {
       После каждого шага ответь на вопрос, затем выбирай следующий тайл
       стрелками на клавиатуре или кнопками на экране. Таймер стекла не виден.
     </p>
-    <button id="start-btn">Начать путь</button>
+    <button id="legacy-start-btn">Начать путь</button>
   </div>
 </div>
 

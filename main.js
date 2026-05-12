@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { pickQuestion } from './questions.js';
+import {
+  GRAMMAR_TOPICS,
+  LANGUAGE_LEVELS,
+  LEXICAL_TOPICS,
+  QuestionBank,
+  pickQuestion,
+} from './questions.js';
 
 window.__gameBooted = true;
 
@@ -19,12 +25,14 @@ const BRIDGE_ROWS = 7;
 const PLATFORM_SIZE = 9.5;
 const MOUSE_SENS = 0.0022;
 const STEP_MOVE_MS = 460;
+const MOVE_DIRECTION_MIN_DOT = 0.2;
 const FRAGILE_BASE_SECONDS = 8;
 const FRAGILE_EXTRA_MIN_SECONDS = 1;
 const FRAGILE_EXTRA_MAX_SECONDS = 6;
 const FALL_DURATION_MS = 2400;
 const CITY_TARGET_TOP_Y = 60;
 const PLATFORM_Y = 32;
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -131,7 +139,13 @@ const STATE = {
 
   step: 0,
   currentQuestion: null,
+  questionLoading: false,
   questionLocked: false,
+  questionRequestToken: 0,
+  questionSettings: null,
+  questionsAnswered: 0,
+  questionsCorrect: 0,
+  diaryEntries: [],
   playerCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
   moving: false,
   moveStart: 0,
@@ -843,7 +857,9 @@ function disposeObject(obj) {
 function resetPlayer() {
   STATE.step = 0;
   STATE.currentQuestion = null;
+  STATE.questionLoading = false;
   STATE.questionLocked = false;
+  STATE.questionRequestToken++;
   STATE.moving = false;
   STATE.playerCell.row = -1;
   STATE.playerCell.col = Math.floor(BRIDGE_COLS / 2);
@@ -926,16 +942,323 @@ const hintEl = document.getElementById('hint');
 const stepNumber = document.getElementById('step-number');
 const stepTotal = document.getElementById('step-total');
 const altitudeEl = document.getElementById('altitude');
+const questionScoreEl = document.getElementById('question-score');
 const gameoverEl = document.getElementById('gameover');
 const endTitle = document.getElementById('endtitle');
 const endText = document.getElementById('endtext');
 const restartBtn = document.getElementById('restart');
 const dangerWarning = document.getElementById('danger-warning');
 const moveControls = document.getElementById('move-controls');
+const diaryEl = document.getElementById('diary');
+const diaryBtn = document.getElementById('diary-btn');
+const diaryCloseBtn = document.getElementById('diary-close');
+const diaryListEl = document.getElementById('diary-list');
 if (quizEl) quizEl.classList.add('hidden');
 if (timerFill) timerFill.style.transform = 'scaleX(1)';
 if (timerLabel) timerLabel.textContent = '';
 if (hintEl) hintEl.textContent = 'Ответ откроет следующий шаг. Время стекла не показывается.';
+
+const questionBank = new QuestionBank();
+const MENU_STATE_KEY = 'nad_gorizontom_flammen_dashboard_v1';
+const DIFFICULTIES = [
+  { id: 'easy', title: 'Лёгкий', desc: 'больше времени' },
+  { id: 'medium', title: 'Средний', desc: 'обычный темп' },
+  { id: 'hard', title: 'Трудный', desc: 'нервное стекло' },
+];
+const RITUAL_SLOTS = Array.from({ length: BRIDGE_ROWS }, (_, index) => ({
+  title: `Ряд ${index + 1}`,
+  role: `Стекло ${index + 1}`,
+}));
+
+function isWortstellungTopic(grammarTopic) {
+  return typeof grammarTopic === 'string' && grammarTopic.includes('Wortstellung');
+}
+
+const dashboard = {
+  intro,
+  startButton: startBtn,
+  startStatus: document.getElementById('start-status'),
+  playerName: document.getElementById('player-name'),
+  steps: Array.from(document.querySelectorAll('.setup-step')),
+  progressSteps: Array.from(document.querySelectorAll('.progress-step')),
+  levelButtons: document.getElementById('level-buttons'),
+  difficultyButtons: document.getElementById('difficulty-buttons'),
+  lexicalGrid: document.getElementById('lexical-grid'),
+  ritualSlots: document.getElementById('ritual-slots'),
+  grammarPicker: document.getElementById('grammar-picker'),
+  ready: false,
+  selectedStep: 1,
+  selectedLevel: null,
+  selectedDifficulty: 'hard',
+  selectedLexical: null,
+  selectedGrammar: null,
+  selectedSlotIndex: null,
+  slotAssignments: Array(BRIDGE_ROWS).fill(null),
+
+  bind() {
+    this.loadState();
+    this.populate();
+    this.startButton?.addEventListener('click', () => this.requestStart());
+    document.getElementById('to-step2-btn')?.addEventListener('click', () => this.showStep(2));
+    document.getElementById('back-to-step1')?.addEventListener('click', () => this.showStep(1));
+    document.getElementById('back-to-step2')?.addEventListener('click', () => this.showStep(2));
+    document.getElementById('back-to-step3')?.addEventListener('click', () => this.showStep(3));
+    this.playerName?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        this.showStep(2);
+      }
+    });
+    this.playerName?.addEventListener('input', () => this.saveState());
+  },
+
+  loadState() {
+    try {
+      const savedName = localStorage.getItem('flammen_player_name');
+      const raw = localStorage.getItem(MENU_STATE_KEY);
+      if (savedName && this.playerName) this.playerName.value = savedName;
+      if (!raw) return;
+
+      const state = JSON.parse(raw);
+      if (LANGUAGE_LEVELS.includes(state.selectedLevel)) this.selectedLevel = state.selectedLevel;
+      if (DIFFICULTIES.some((difficulty) => difficulty.id === state.selectedDifficulty)) {
+        this.selectedDifficulty = state.selectedDifficulty;
+      }
+      if (LEXICAL_TOPICS.includes(state.selectedLexical)) this.selectedLexical = state.selectedLexical;
+      if (Array.isArray(state.slotAssignments)) {
+        this.slotAssignments = Array.from({ length: BRIDGE_ROWS }, (_, index) => {
+          const topic = state.slotAssignments[index];
+          return GRAMMAR_TOPICS.includes(topic) ? topic : null;
+        });
+      }
+      if (Number.isInteger(state.selectedStep)) {
+        this.selectedStep = Math.max(1, Math.min(4, state.selectedStep));
+      }
+    } catch (error) {
+      // Local storage is optional.
+    }
+  },
+
+  saveState() {
+    try {
+      const playerName = this.playerName?.value.trim();
+      if (playerName) localStorage.setItem('flammen_player_name', playerName);
+      localStorage.setItem(MENU_STATE_KEY, JSON.stringify({
+        selectedLevel: this.selectedLevel,
+        selectedDifficulty: this.selectedDifficulty,
+        selectedLexical: this.selectedLexical,
+        selectedStep: this.selectedStep,
+        slotAssignments: this.slotAssignments,
+      }));
+    } catch (error) {
+      // Local storage is optional.
+    }
+  },
+
+  populate() {
+    this.renderLevelButtons();
+    this.renderDifficultyButtons();
+    this.renderLexicalGrid();
+    this.renderSlots();
+    this.renderGrammarPicker();
+    this.showStep(this.getRestoredStep());
+    this.updateStartButton();
+  },
+
+  getRestoredStep() {
+    if (this.selectedStep >= 4 && this.selectedLevel && this.selectedLexical) return 4;
+    if (this.selectedStep >= 3 && this.selectedLevel) return 3;
+    if (this.selectedStep >= 2) return 2;
+    return 1;
+  },
+
+  showStep(step) {
+    this.selectedStep = step;
+    this.steps.forEach((node) => {
+      node.classList.toggle('hidden', node.id !== `setup-step${step}`);
+    });
+    this.progressSteps.forEach((node) => {
+      node.classList.toggle('active', node.dataset.progressStep === String(step));
+    });
+    this.saveState();
+  },
+
+  renderLevelButtons() {
+    if (!this.levelButtons) return;
+    const labels = {
+      A1: 'Начальный',
+      A2: 'Базовый',
+      B1: 'Средний',
+      B2: 'Выше среднего',
+    };
+    this.levelButtons.innerHTML = '';
+    for (const level of LANGUAGE_LEVELS) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'level-btn';
+      button.innerHTML = `<span class="level-code">${level}</span><span class="level-desc">${labels[level] || ''}</span>`;
+      button.classList.toggle('selected', this.selectedLevel === level);
+      button.addEventListener('click', () => {
+        this.selectedLevel = level;
+        this.renderLevelButtons();
+        this.updateStartButton();
+        this.saveState();
+        this.showStep(3);
+      });
+      this.levelButtons.appendChild(button);
+    }
+  },
+
+  renderDifficultyButtons() {
+    if (!this.difficultyButtons) return;
+    this.difficultyButtons.innerHTML = '';
+    for (const difficulty of DIFFICULTIES) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'difficulty-btn';
+      button.innerHTML = `<span class="level-code">${difficulty.title}</span><span class="level-desc">${difficulty.desc}</span>`;
+      button.classList.toggle('selected', this.selectedDifficulty === difficulty.id);
+      button.addEventListener('click', () => {
+        this.selectedDifficulty = difficulty.id;
+        this.renderDifficultyButtons();
+        this.saveState();
+      });
+      this.difficultyButtons.appendChild(button);
+    }
+  },
+
+  renderLexicalGrid() {
+    if (!this.lexicalGrid) return;
+    this.lexicalGrid.innerHTML = '';
+    for (const topic of LEXICAL_TOPICS) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'lexical-btn';
+      button.textContent = topic;
+      button.classList.toggle('selected', this.selectedLexical === topic);
+      button.addEventListener('click', () => {
+        this.selectedLexical = topic;
+        this.renderLexicalGrid();
+        this.updateStartButton();
+        this.saveState();
+        this.showStep(4);
+      });
+      this.lexicalGrid.appendChild(button);
+    }
+  },
+
+  renderSlots() {
+    if (!this.ritualSlots) return;
+    this.ritualSlots.innerHTML = '';
+    RITUAL_SLOTS.forEach((slot, index) => {
+      const grammar = this.slotAssignments[index];
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ritual-slot';
+      button.classList.toggle('selected-slot', this.selectedSlotIndex === index);
+      button.innerHTML =
+        `<div class="slot-bonus">${slot.role}</div>` +
+        `<div class="slot-topic">${grammar || slot.title}</div>` +
+        `<div class="slot-grammar">${grammar ? 'тема вопроса для этого ряда' : 'выберите грамматику для ряда'}</div>`;
+      button.addEventListener('click', () => {
+        if (this.selectedGrammar) {
+          this.assignGrammarToSlot(index, this.selectedGrammar);
+          return;
+        }
+        this.selectedSlotIndex = this.selectedSlotIndex === index ? null : index;
+        this.saveState();
+        this.renderSlots();
+        this.renderGrammarPicker();
+      });
+      this.ritualSlots.appendChild(button);
+    });
+  },
+
+  renderGrammarPicker() {
+    if (!this.grammarPicker) return;
+    this.grammarPicker.innerHTML = '';
+    for (const topic of GRAMMAR_TOPICS) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'grammar-tag';
+      button.textContent = topic;
+      button.classList.toggle('selected-grammar', this.selectedGrammar === topic);
+      button.addEventListener('click', () => {
+        if (this.selectedSlotIndex !== null) {
+          this.assignGrammarToSlot(this.selectedSlotIndex, topic);
+          return;
+        }
+        this.selectedGrammar = this.selectedGrammar === topic ? null : topic;
+        this.saveState();
+        this.renderSlots();
+        this.renderGrammarPicker();
+      });
+      this.grammarPicker.appendChild(button);
+    }
+  },
+
+  assignGrammarToSlot(slotIndex, grammarTopic) {
+    this.slotAssignments[slotIndex] = grammarTopic;
+    this.selectedGrammar = null;
+    this.selectedSlotIndex = null;
+    this.saveState();
+    this.renderSlots();
+    this.renderGrammarPicker();
+    this.updateStartButton();
+  },
+
+  isComplete() {
+    return Boolean(this.selectedLevel && this.selectedLexical && this.slotAssignments.every(Boolean));
+  },
+
+  setReady(isReady) {
+    this.ready = isReady;
+    if (this.startStatus) {
+      this.startStatus.textContent = isReady
+        ? 'Город готов. Настрой темы и начинай.'
+        : 'Сцена загружается...';
+    }
+    this.updateStartButton();
+  },
+
+  updateStartButton() {
+    if (this.startButton) this.startButton.disabled = !this.ready || !this.isComplete();
+  },
+
+  getSettings() {
+    const playerName = this.playerName?.value.trim() || 'Spieler';
+    try { localStorage.setItem('flammen_player_name', playerName); } catch (error) {}
+    this.saveState();
+    return {
+      playerName,
+      langLevel: this.selectedLevel || 'A2',
+      difficulty: this.selectedDifficulty || 'hard',
+      lexicalTopic: this.selectedLexical || LEXICAL_TOPICS[0],
+      grammarSlots: this.slotAssignments.map((grammarTopic, index) => ({
+        grammarTopic,
+        bridgeIndex: index,
+        isWortstellung: isWortstellungTopic(grammarTopic),
+      })),
+    };
+  },
+
+  requestStart() {
+    if (!this.ready || !this.isComplete()) {
+      if (this.startStatus) {
+        this.startStatus.textContent = this.ready
+          ? 'Заполните все ряды перед стартом.'
+          : 'Сцена загружается...';
+      }
+      return;
+    }
+
+    STATE.questionSettings = this.getSettings();
+    questionBank.configure(STATE.questionSettings);
+    enterPlay();
+  },
+};
+
+dashboard.bind();
 
 function setDangerWarning(strength) {
   STATE.dangerWarningStrength = THREE.MathUtils.clamp(strength, 0, 1);
@@ -959,6 +1282,67 @@ function updateHudProgress() {
   const currentRow = Math.max(0, Math.min(BRIDGE_ROWS, STATE.playerCell.row + 1));
   stepNumber.textContent = String(currentRow);
   stepTotal.textContent = String(BRIDGE_ROWS);
+  if (questionScoreEl) {
+    questionScoreEl.textContent = `${STATE.questionsCorrect}/${STATE.questionsAnswered}`;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
+function recordQuestionOutcome(question, correct) {
+  const meta = question?.meta;
+  STATE.questionsAnswered += 1;
+  if (correct) STATE.questionsCorrect += 1;
+
+  if (!correct && meta?.generated) {
+    questionBank.returnQuestion(meta);
+  }
+
+  const display = String(meta?.display || question?.q || '').replace(/_{2,}/g, '—');
+  STATE.diaryEntries.push({
+    id: `${performance.now()}:${STATE.diaryEntries.length}`,
+    correct,
+    level: meta?.level || STATE.questionSettings?.langLevel || '',
+    topic: meta?.topic || getCurrentQuestionSlot()?.grammarTopic || '',
+    lexicalTopic: meta?.lexicalTopic || STATE.questionSettings?.lexicalTopic || '',
+    text: meta?.text || '',
+    display,
+  });
+  updateHudProgress();
+}
+
+function renderDiary() {
+  if (!diaryListEl) return;
+
+  if (!STATE.diaryEntries.length) {
+    diaryListEl.innerHTML = '<div class="diary-empty">Пока нет отвеченных вопросов.</div>';
+    return;
+  }
+
+  diaryListEl.innerHTML = STATE.diaryEntries.map((entry, index) => (
+    `<article class="diary-entry">` +
+    `<div class="diary-meta">${index + 1}. ${entry.correct ? 'верно' : 'ошибка'} - ${escapeHtml(entry.topic)} - ${escapeHtml(entry.level)} - ${escapeHtml(entry.lexicalTopic)}</div>` +
+    `<div class="diary-text">${escapeHtml(entry.text || 'Вопрос')}</div>` +
+    `<div class="diary-display">${escapeHtml(entry.display)}</div>` +
+    `</article>`
+  )).join('');
+}
+
+function showDiary() {
+  renderDiary();
+  diaryEl?.classList.remove('hidden');
+}
+
+function hideDiary() {
+  diaryEl?.classList.add('hidden');
 }
 
 function setOptionsDisabled(disabled) {
@@ -969,16 +1353,81 @@ function setOptionsDisabled(disabled) {
 
 function clearQuestion() {
   STATE.currentQuestion = null;
+  STATE.questionLoading = false;
   STATE.questionLocked = false;
+  STATE.questionRequestToken++;
   quizEl.classList.add('hidden');
   moveControls?.classList.remove('locked');
 }
 
-function startQuestion() {
+function getCurrentQuestionSlot() {
+  const slots = STATE.questionSettings?.grammarSlots;
+  if (!Array.isArray(slots) || STATE.playerCell.row < 0) return null;
+  return slots[STATE.playerCell.row] || null;
+}
+
+function normalizeBridgeQuestion(rawQuestion) {
+  if (!rawQuestion) return pickQuestion();
+  if (typeof rawQuestion.q === 'string') return rawQuestion;
+
+  const correct = Number.isInteger(rawQuestion.correctIndex)
+    ? rawQuestion.correctIndex
+    : rawQuestion.correct;
+  if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length !== 4 || !Number.isInteger(correct)) {
+    return pickQuestion();
+  }
+  return {
+    q: [rawQuestion.text, rawQuestion.display].filter(Boolean).join(' ').trim(),
+    options: rawQuestion.options || [],
+    correct,
+    meta: rawQuestion,
+  };
+}
+
+function showQuestionLoading(slot) {
+  STATE.questionLoading = true;
+  STATE.questionLocked = true;
+  STATE.currentQuestion = null;
+  questionEl.textContent = slot?.grammarTopic
+    ? `Готовим вопрос: ${slot.grammarTopic}`
+    : 'Готовим вопрос...';
+  optionsEl.innerHTML = '<div class="option option-loading">Генератор подбирает четыре варианта...</div>';
+  if (hintEl) {
+    hintEl.textContent = 'AI-генерация включится при AITUNNEL_API_KEY; без ключа игра берёт fallback-вопросы Flammen.';
+  }
+  quizEl.classList.remove('shake');
+  quizEl.classList.remove('hidden');
+  moveControls?.classList.add('locked');
+}
+
+async function startQuestion() {
   if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
   if (STATE.playerCell.row < 0 || STATE.playerCell.row >= BRIDGE_ROWS) return;
 
-  STATE.currentQuestion = pickQuestion();
+  const token = ++STATE.questionRequestToken;
+  const slot = getCurrentQuestionSlot();
+  showQuestionLoading(slot);
+
+  let rawQuestion = null;
+  try {
+    rawQuestion = await questionBank.nextQuestion(slot);
+  } catch (error) {
+    console.warn('QuestionBank failed; using bridge fallback question.', error);
+    rawQuestion = pickQuestion();
+  }
+
+  if (
+    token !== STATE.questionRequestToken ||
+    !STATE.active ||
+    STATE.falling ||
+    STATE.won ||
+    STATE.moving
+  ) {
+    return;
+  }
+
+  STATE.currentQuestion = normalizeBridgeQuestion(rawQuestion);
+  STATE.questionLoading = false;
   STATE.questionLocked = false;
 
   questionEl.textContent = STATE.currentQuestion.q.replace('___', '_____');
@@ -990,10 +1439,19 @@ function startQuestion() {
     button.addEventListener('click', () => onAnswer(idx, button));
     optionsEl.appendChild(button);
   });
+  if (hintEl) {
+    const meta = STATE.currentQuestion.meta;
+    hintEl.textContent = meta?.topic
+      ? `${meta.topic} · ${meta.level || STATE.questionSettings?.langLevel || ''} · ${meta.lexicalTopic || STATE.questionSettings?.lexicalTopic || ''}`
+      : 'Ответ откроет следующий шаг. Время стекла не показывается.';
+  }
 
   quizEl.classList.remove('shake');
   quizEl.classList.remove('hidden');
   moveControls?.classList.add('locked');
+
+  const idx = currentTileIndex();
+  if (idx >= 0) armFragileTile(idx);
 }
 
 function damageCurrentTile(amount) {
@@ -1016,10 +1474,13 @@ function damageCurrentTile(amount) {
 function onAnswer(idx, button) {
   if (!STATE.active || STATE.questionLocked || !STATE.currentQuestion) return;
 
+  const answeredQuestion = STATE.currentQuestion;
+  const correct = answeredQuestion.correct === idx;
   STATE.questionLocked = true;
   setOptionsDisabled(true);
+  recordQuestionOutcome(answeredQuestion, correct);
 
-  if (STATE.currentQuestion.correct === idx) {
+  if (correct) {
     button.classList.add('correct');
     setTimeout(() => {
       if (!STATE.active || STATE.falling || STATE.won) return;
@@ -1049,7 +1510,12 @@ function enterPlay() {
   moveControls?.classList.remove('locked');
   quizEl.classList.add('hidden');
   STATE.currentQuestion = null;
+  STATE.questionLoading = false;
   STATE.questionLocked = false;
+  STATE.questionRequestToken++;
+  STATE.questionsAnswered = 0;
+  STATE.questionsCorrect = 0;
+  STATE.diaryEntries = [];
   STATE.intro = false;
   STATE.active = true;
   setDangerWarning(0);
@@ -1060,9 +1526,11 @@ function showIntro() {
   stepTotal.textContent = String(BRIDGE_ROWS);
   stepNumber.textContent = '0';
   intro.classList.remove('hidden');
+  dashboard.setReady(true);
   STATE.intro = true;
   STATE.active = false;
   STATE.currentQuestion = null;
+  STATE.questionLoading = false;
   STATE.questionLocked = false;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
@@ -1070,12 +1538,14 @@ function showIntro() {
   setDangerWarning(0);
 }
 
-startBtn.addEventListener('click', () => {
-  enterPlay();
-});
-
 restartBtn.addEventListener('click', () => {
   softRestart();
+});
+
+diaryBtn?.addEventListener('click', showDiary);
+diaryCloseBtn?.addEventListener('click', hideDiary);
+diaryEl?.addEventListener('click', (event) => {
+  if (event.target === diaryEl) hideDiary();
 });
 
 // ====================================================================
@@ -1200,11 +1670,76 @@ function currentTileIndex() {
   return row * BRIDGE_COLS + col;
 }
 
+function isCellInBounds(row, col) {
+  return row >= -1 && row <= BRIDGE_ROWS && col >= 0 && col < BRIDGE_COLS;
+}
+
+function cameraForwardFlat() {
+  const forward = new THREE.Vector3(
+    -Math.sin(STATE.player.yaw),
+    0,
+    -Math.cos(STATE.player.yaw),
+  );
+  if (forward.lengthSq() < 0.0001) return STATE.forwardDir.clone();
+  return forward.normalize();
+}
+
+function cameraSideFlat() {
+  const right = new THREE.Vector3().crossVectors(cameraForwardFlat(), WORLD_UP);
+  if (right.lengthSq() < 0.0001) return STATE.rightDir.clone();
+  return right.normalize();
+}
+
+function directionForMoveCommand(command) {
+  const forward = cameraForwardFlat();
+  const right = cameraSideFlat();
+  if (command === 'forward') return forward;
+  if (command === 'back') return forward.multiplyScalar(-1);
+  if (command === 'right') return right;
+  if (command === 'left') return right.multiplyScalar(-1);
+  return null;
+}
+
+function cameraRelativeTargetCell(command) {
+  const desired = directionForMoveCommand(command);
+  if (!desired) return null;
+
+  const { row, col } = STATE.playerCell;
+  const origin = cellWorldPosition(row, col);
+  const candidates = [
+    { row: row + 1, col },
+    { row, col: col + 1 },
+    { row: row - 1, col },
+    { row, col: col - 1 },
+  ].filter((cell) => isCellInBounds(cell.row, cell.col));
+
+  let best = null;
+  let bestDot = -Infinity;
+
+  for (const cell of candidates) {
+    const stepDir = cellWorldPosition(cell.row, cell.col).sub(origin);
+    stepDir.y = 0;
+    if (stepDir.lengthSq() < 0.0001) continue;
+    const dot = stepDir.normalize().dot(desired);
+    if (dot > bestDot) {
+      best = cell;
+      bestDot = dot;
+    }
+  }
+
+  return bestDot > MOVE_DIRECTION_MIN_DOT ? best : null;
+}
+
 function randomFragileDurationMs() {
   const extra =
     FRAGILE_EXTRA_MIN_SECONDS +
     Math.random() * (FRAGILE_EXTRA_MAX_SECONDS - FRAGILE_EXTRA_MIN_SECONDS);
-  return (FRAGILE_BASE_SECONDS + extra) * 1000;
+  const difficultyScale = {
+    easy: 3.0,
+    medium: 1.75,
+    hard: 1.0,
+  }[STATE.questionSettings?.difficulty || 'hard'] || 1.0;
+  return (FRAGILE_BASE_SECONDS + extra) * 1000 * difficultyScale;
 }
 
 function armFragileTile(idx, now = performance.now()) {
@@ -1233,8 +1768,6 @@ function landOnCell(row, col) {
     return;
   }
 
-  const idx = currentTileIndex();
-  if (idx >= 0) armFragileTile(idx);
   startQuestion();
 }
 
@@ -1253,17 +1786,11 @@ function startMoveToCell(row, col) {
 
 function requestMove(command) {
   if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
-  if (STATE.currentQuestion) return;
+  if (STATE.currentQuestion || STATE.questionLoading) return;
 
-  let { row, col } = STATE.playerCell;
-  if (command === 'forward') row += 1;
-  if (command === 'back') row -= 1;
-  if (command === 'left') col -= 1;
-  if (command === 'right') col += 1;
-
-  if (row < -1 || row > BRIDGE_ROWS) return;
-  if (col < 0 || col >= BRIDGE_COLS) return;
-  startMoveToCell(row, col);
+  const target = cameraRelativeTargetCell(command);
+  if (!target) return;
+  startMoveToCell(target.row, target.col);
 }
 
 function updateGame(t) {
@@ -1382,6 +1909,8 @@ function onWin() {
   STATE.won = true;
   STATE.active = false;
   STATE.currentQuestion = null;
+  STATE.questionLoading = false;
+  STATE.questionRequestToken++;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
   setDangerWarning(0);
@@ -1398,6 +1927,8 @@ function triggerFall() {
   STATE.active = false;
   STATE.moving = false;
   STATE.currentQuestion = null;
+  STATE.questionLoading = false;
+  STATE.questionRequestToken++;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
   setDangerWarning(0);
