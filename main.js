@@ -30,15 +30,10 @@ const MOVE_DIRECTION_MIN_DOT = 0.2;
 const FRAGILE_BASE_SECONDS = 8;
 const FRAGILE_EXTRA_MIN_SECONDS = 1;
 const FRAGILE_EXTRA_MAX_SECONDS = 6;
-const FALL_GRAVITY = 9.81;
-const FALL_DURATION_MS = 5000;
-const FALL_COLLISION_CLEARANCE = 1.15;
-const FALL_CAMERA_UP_PITCH = 1.18;
-const FALL_DIARY_DELAY_MS = 650;
+const FALL_DURATION_MS = 2400;
 const CITY_TARGET_TOP_Y = 60;
-const PLATFORM_Y = 86;
+const PLATFORM_Y = 32;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
-const WORLD_DOWN = new THREE.Vector3(0, -1, 0);
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -165,20 +160,9 @@ const STATE = {
   intro: true,
   active: false,
   falling: false,
-  fallLanded: false,
-  fallDiaryShown: false,
-  fallCameraYaw: 0,
-  fallCameraPitch: 0,
-  fallCameraRoll: 0,
-  fallImpactY: null,
-  fallStartY: 0,
-  fallStartPos: new THREE.Vector3(),
-  fallTargetPos: new THREE.Vector3(),
-  fallAccelY: FALL_GRAVITY,
   won: false,
   fallVel: new THREE.Vector3(),
   fallStart: 0,
-  fallLandTime: 0,
   paused: false,
   returningFromSettings: false,
 
@@ -859,14 +843,6 @@ function rebuildRun() {
   scene.add(STATE.bridgeGroup);
 
   STATE.falling = false;
-  STATE.fallLanded = false;
-  STATE.fallDiaryShown = false;
-  STATE.fallImpactY = null;
-  STATE.fallStartY = 0;
-  STATE.fallAccelY = FALL_GRAVITY;
-  STATE.fallStartPos.set(0, 0, 0);
-  STATE.fallTargetPos.set(0, 0, 0);
-  STATE.fallLandTime = 0;
   STATE.won = false;
   STATE.fallVel.set(0, 0, 0);
 
@@ -1394,7 +1370,6 @@ function hideDiary() {
   diaryEl?.classList.remove('diary-forced');
   if (diaryCloseBtn) diaryCloseBtn.textContent = 'Закрыть';
   diaryEl?.classList.add('hidden');
-  if (wasForced) showFallResult();
 }
 
 function setOptionsDisabled(disabled) {
@@ -1577,9 +1552,6 @@ function enterPlay(options = {}) {
   STATE.active = true;
   STATE.paused = false;
   STATE.falling = false;
-  STATE.fallLanded = false;
-  STATE.fallDiaryShown = false;
-  STATE.fallStartY = 0;
   setDangerWarning(0);
   updateHudProgress();
 }
@@ -2034,96 +2006,6 @@ function onWin() {
   gameoverEl.classList.remove('hidden');
 }
 
-const fallRaycaster = new THREE.Raycaster();
-
-function fallImpactY() {
-  if (STATE.cityBounds) return STATE.cityBounds.min.y + FALL_COLLISION_CLEARANCE;
-  return STATE.groundY - 120;
-}
-
-function firstCitySurfaceYAt(x, z) {
-  if (!STATE.cityRoot || !STATE.cityBounds) return null;
-  fallRaycaster.ray.origin.set(x, STATE.cityBounds.max.y + 120, z);
-  fallRaycaster.ray.direction.copy(WORLD_DOWN);
-  const hits = fallRaycaster.intersectObject(STATE.cityRoot, true);
-  return hits.length ? hits[0].point.y : null;
-}
-
-function findClearFallTarget(startPos) {
-  if (!STATE.cityRoot || !STATE.cityBounds) return startPos.clone();
-
-  const bottomY = fallImpactY();
-  const maxClearSurfaceY = bottomY + 8;
-  const radii = [0, 4, 8, 14, 22, 32, 44];
-  let best = startPos.clone();
-  let bestScore = Infinity;
-
-  for (const radius of radii) {
-    const steps = radius === 0 ? 1 : 14;
-    for (let i = 0; i < steps; i++) {
-      const angle = steps === 1 ? 0 : (i / steps) * Math.PI * 2;
-      const x = startPos.x + Math.cos(angle) * radius;
-      const z = startPos.z + Math.sin(angle) * radius;
-      if (
-        x < STATE.cityBounds.min.x ||
-        x > STATE.cityBounds.max.x ||
-        z < STATE.cityBounds.min.z ||
-        z > STATE.cityBounds.max.z
-      ) {
-        continue;
-      }
-
-      const surfaceY = firstCitySurfaceYAt(x, z);
-      const roofPenalty = Number.isFinite(surfaceY)
-        ? Math.max(0, surfaceY - maxClearSurfaceY)
-        : 0;
-      const distancePenalty = Math.hypot(x - startPos.x, z - startPos.z) * 0.12;
-      const score = roofPenalty * 12 + distancePenalty;
-      if (score < bestScore) {
-        bestScore = score;
-        best.set(x, bottomY, z);
-      }
-      if (roofPenalty <= 0.001) return best;
-    }
-  }
-
-  best.y = bottomY;
-  return best;
-}
-
-function configureFallMotion() {
-  const duration = FALL_DURATION_MS / 1000;
-  const distance = Math.max(1, STATE.fallStartY - STATE.fallImpactY);
-  const gravityDistance = 0.5 * FALL_GRAVITY * duration * duration;
-
-  STATE.fallAccelY = gravityDistance > distance
-    ? (2 * distance) / (duration * duration)
-    : FALL_GRAVITY;
-
-  STATE.fallVel.y = (STATE.fallImpactY - STATE.fallStartY + 0.5 * STATE.fallAccelY * duration * duration) / duration;
-  if (STATE.fallVel.y > 0) {
-    STATE.fallVel.y = 0;
-    STATE.fallAccelY = (2 * distance) / (duration * duration);
-  }
-}
-
-function settleFall(t) {
-  if (STATE.fallLanded) return;
-  STATE.fallLanded = true;
-  STATE.fallLandTime = t;
-  STATE.fallVel.set(0, 0, 0);
-  const impactY = Number.isFinite(STATE.fallImpactY) ? STATE.fallImpactY : fallImpactY();
-  STATE.player.pos.y = impactY;
-  STATE.player.pos.x = STATE.fallTargetPos.x;
-  STATE.player.pos.z = STATE.fallTargetPos.z;
-}
-
-function showFallResult() {
-  endTitle.textContent = 'Ты упал';
-  endText.textContent = 'Стекло отпустило. Город остался внизу, а записи уже открыты на нужной странице.';
-  gameoverEl.classList.remove('hidden');
-}
-
 function triggerFall() {
   if (STATE.falling) return;
   STATE.falling = true;
@@ -2133,29 +2015,24 @@ function triggerFall() {
   STATE.currentQuestion = null;
   STATE.questionLoading = false;
   STATE.questionRequestToken++;
-  STATE.fallLanded = false;
-  STATE.fallDiaryShown = false;
   quizEl.classList.add('hidden');
   moveControls?.classList.add('hidden');
   pauseMenuEl?.classList.add('hidden');
   setDangerWarning(0);
   STATE.fallStart = performance.now();
-  STATE.fallLandTime = 0;
-  STATE.fallStartPos.copy(STATE.player.pos);
-  STATE.fallStartY = STATE.player.pos.y;
-  STATE.fallImpactY = fallImpactY();
-  STATE.fallTargetPos.copy(findClearFallTarget(STATE.player.pos));
-  STATE.fallCameraYaw = STATE.player.yaw;
-  STATE.fallCameraPitch = THREE.MathUtils.clamp(STATE.player.pitch - 0.1, -0.95, 0.65);
-  STATE.fallCameraRoll = 0;
   STATE.fallVel.set(
-    0,
-    0,
-    0,
+    (Math.random() - 0.5) * 0.4,
+    -2.4,
+    (Math.random() - 0.5) * 0.4,
   );
-  configureFallMotion();
 
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+
+  setTimeout(() => {
+    endTitle.textContent = 'Ты упал';
+    endText.textContent = 'Стекло не выдержало. Город принял тебя.';
+    gameoverEl.classList.remove('hidden');
+  }, FALL_DURATION_MS);
 }
 
 // ====================================================================
@@ -2254,48 +2131,12 @@ function animate() {
     camera.lookAt(camera.position.clone().add(lookDir));
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   } else {
-    if (!STATE.fallLanded) {
-      const elapsed = Math.min((t - STATE.fallStart) / 1000, FALL_DURATION_MS / 1000);
-      const driftRaw = THREE.MathUtils.clamp(elapsed / 1.4, 0, 1);
-      const drift = driftRaw * driftRaw * (3 - 2 * driftRaw);
-      STATE.player.pos.x = THREE.MathUtils.lerp(STATE.fallStartPos.x, STATE.fallTargetPos.x, drift);
-      STATE.player.pos.z = THREE.MathUtils.lerp(STATE.fallStartPos.z, STATE.fallTargetPos.z, drift);
-      STATE.player.pos.y =
-        STATE.fallStartY +
-        STATE.fallVel.y * elapsed -
-        0.5 * STATE.fallAccelY * elapsed * elapsed;
-
-      if (
-        STATE.player.pos.y <= STATE.fallImpactY ||
-        t - STATE.fallStart >= FALL_DURATION_MS
-      ) {
-        settleFall(t);
-      }
-    } else if (!STATE.fallDiaryShown && t - STATE.fallLandTime >= FALL_DIARY_DELAY_MS) {
-      STATE.fallDiaryShown = true;
-      showDiary({ afterFall: true });
-    }
-
-    const pitchTarget = STATE.fallLanded
-      ? FALL_CAMERA_UP_PITCH
-      : Math.max(-0.8, STATE.fallCameraPitch - dt * 0.08);
-    const pitchEase = 1 - Math.exp(-dt * (STATE.fallLanded ? 3.6 : 0.9));
-    STATE.fallCameraPitch = THREE.MathUtils.lerp(STATE.fallCameraPitch, pitchTarget, pitchEase);
-    STATE.fallCameraRoll = THREE.MathUtils.lerp(
-      STATE.fallCameraRoll,
-      STATE.fallLanded ? 0 : 0.18,
-      1 - Math.exp(-dt * 1.4),
-    );
-
+    STATE.fallVel.y -= 12 * dt;
+    STATE.player.pos.addScaledVector(STATE.fallVel, dt * 6);
     camera.position.copy(STATE.player.pos);
     camera.position.y += PLAYER_EYE;
-    const lookDir = new THREE.Vector3(
-      -Math.sin(STATE.fallCameraYaw) * Math.cos(STATE.fallCameraPitch),
-      Math.sin(STATE.fallCameraPitch),
-      -Math.cos(STATE.fallCameraYaw) * Math.cos(STATE.fallCameraPitch),
-    );
-    camera.lookAt(camera.position.clone().add(lookDir));
-    camera.rotateZ(STATE.fallCameraRoll);
+    camera.rotation.x -= dt * 0.6;
+    camera.rotation.z += dt * 0.25;
     altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
   }
 
