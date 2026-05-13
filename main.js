@@ -31,6 +31,7 @@ const FRAGILE_BASE_SECONDS = 8;
 const FRAGILE_EXTRA_MIN_SECONDS = 1;
 const FRAGILE_EXTRA_MAX_SECONDS = 6;
 const FALL_DURATION_MS = 2400;
+const SECOND_LEVEL_FRAGILE_LIMIT_MS = 40000;
 const CITY_TARGET_TOP_Y = 60;
 const PLATFORM_Y = 32;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -138,12 +139,18 @@ const STATE = {
   },
   pointerLocked: false,
   cameraDragging: false,
+  cameraPointerId: null,
+  cameraPointerLastX: 0,
+  cameraPointerLastY: 0,
 
   step: 0,
   currentQuestion: null,
   questionLoading: false,
   questionLocked: false,
   questionRequestToken: 0,
+  questionTargetCell: { row: -999, col: -999 },
+  preparedQuestion: null,
+  preparedQuestionCell: { row: -999, col: -999 },
   questionSettings: null,
   questionsAnswered: 0,
   questionsCorrect: 0,
@@ -156,6 +163,9 @@ const STATE = {
   moveTo: new THREE.Vector3(),
   moveTargetCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
   dangerWarningStrength: 0,
+  bridgeLevel: 1,
+  weakGlassStreakMs: 0,
+  weakGlassLastT: 0,
 
   intro: true,
   active: false,
@@ -844,12 +854,15 @@ function rebuildRun() {
 
   STATE.falling = false;
   STATE.won = false;
+  STATE.weakGlassStreakMs = 0;
+  STATE.weakGlassLastT = 0;
   STATE.fallVel.set(0, 0, 0);
 
   resetPlayer();
 }
 
 function softRestart() {
+  STATE.bridgeLevel = 1;
   rebuildRun();
   gameoverEl.classList.add('hidden');
   diaryEl?.classList.add('hidden');
@@ -872,7 +885,14 @@ function resetPlayer() {
   STATE.questionLoading = false;
   STATE.questionLocked = false;
   STATE.questionRequestToken++;
+  STATE.questionTargetCell.row = -999;
+  STATE.questionTargetCell.col = -999;
+  STATE.preparedQuestion = null;
+  STATE.preparedQuestionCell.row = -999;
+  STATE.preparedQuestionCell.col = -999;
   STATE.moving = false;
+  STATE.weakGlassStreakMs = 0;
+  STATE.weakGlassLastT = 0;
   STATE.playerCell.row = -1;
   STATE.playerCell.col = Math.floor(BRIDGE_COLS / 2);
   STATE.moveTargetCell.row = STATE.playerCell.row;
@@ -1387,15 +1407,24 @@ function clearQuestion() {
   STATE.questionLoading = false;
   STATE.questionLocked = false;
   STATE.questionRequestToken++;
+  STATE.questionTargetCell.row = -999;
+  STATE.questionTargetCell.col = -999;
+  STATE.preparedQuestion = null;
+  STATE.preparedQuestionCell.row = -999;
+  STATE.preparedQuestionCell.col = -999;
   quizEl.classList.add('hidden');
   setQuestionControlsOpen(false);
   moveControls?.classList.remove('locked');
 }
 
-function getCurrentQuestionSlot() {
+function getQuestionSlotForCell(row, col) {
   const slots = STATE.questionSettings?.grammarSlots;
-  if (!Array.isArray(slots) || !slots.length || STATE.playerCell.row < 0) return null;
-  return slots[STATE.playerCell.col] || slots[STATE.playerCell.col % slots.length] || null;
+  if (!Array.isArray(slots) || !slots.length || row < 0) return null;
+  return slots[col] || slots[col % slots.length] || null;
+}
+
+function getCurrentQuestionSlot() {
+  return getQuestionSlotForCell(STATE.playerCell.row, STATE.playerCell.col);
 }
 
 function normalizeBridgeQuestion(rawQuestion) {
@@ -1433,35 +1462,27 @@ function showQuestionLoading(slot) {
   moveControls?.classList.add('locked');
 }
 
-async function startQuestion() {
-  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
-  if (STATE.playerCell.row < 0 || STATE.playerCell.row >= BRIDGE_ROWS) return;
+function isSameCell(cell, row, col) {
+  return cell.row === row && cell.col === col;
+}
 
-  const token = ++STATE.questionRequestToken;
-  const slot = getCurrentQuestionSlot();
-  showQuestionLoading(slot);
+function isPlayerOnCell(row, col) {
+  return STATE.playerCell.row === row && STATE.playerCell.col === col;
+}
 
-  let rawQuestion = null;
-  try {
-    rawQuestion = await questionBank.nextQuestion(slot);
-  } catch (error) {
-    console.warn('QuestionBank failed; using bridge fallback question.', error);
-    rawQuestion = pickQuestion();
-  }
+function displayQuestion(question, options = {}) {
+  const locked = Boolean(options.locked);
+  const armTile = options.armTile !== false;
+  const keepPrepared = Boolean(options.keepPrepared);
 
-  if (
-    token !== STATE.questionRequestToken ||
-    !STATE.active ||
-    STATE.falling ||
-    STATE.won ||
-    STATE.moving
-  ) {
-    return;
-  }
-
-  STATE.currentQuestion = normalizeBridgeQuestion(rawQuestion);
+  STATE.currentQuestion = question;
   STATE.questionLoading = false;
-  STATE.questionLocked = false;
+  STATE.questionLocked = locked;
+  if (!keepPrepared) {
+    STATE.preparedQuestion = null;
+    STATE.preparedQuestionCell.row = -999;
+    STATE.preparedQuestionCell.col = -999;
+  }
 
   questionEl.textContent = STATE.currentQuestion.q.replace('___', '_____');
   optionsEl.innerHTML = '';
@@ -1469,6 +1490,7 @@ async function startQuestion() {
     const button = document.createElement('button');
     button.className = 'option';
     button.textContent = option;
+    button.disabled = locked;
     button.addEventListener('click', () => onAnswer(idx, button));
     optionsEl.appendChild(button);
   });
@@ -1484,8 +1506,53 @@ async function startQuestion() {
   setQuestionControlsOpen(true);
   moveControls?.classList.add('locked');
 
-  const idx = currentTileIndex();
-  if (idx >= 0) armFragileTile(idx);
+  if (armTile) {
+    const idx = currentTileIndex();
+    if (idx >= 0) armFragileTile(idx);
+  }
+}
+
+async function startQuestion(row = STATE.playerCell.row, col = STATE.playerCell.col) {
+  if (!STATE.active || STATE.falling || STATE.won) return;
+  if (row < 0 || row >= BRIDGE_ROWS) return;
+
+  if (STATE.preparedQuestion && isSameCell(STATE.preparedQuestionCell, row, col) && !STATE.moving) {
+    displayQuestion(STATE.preparedQuestion);
+    return;
+  }
+
+  const token = ++STATE.questionRequestToken;
+  STATE.questionTargetCell.row = row;
+  STATE.questionTargetCell.col = col;
+  STATE.preparedQuestion = null;
+  STATE.preparedQuestionCell.row = -999;
+  STATE.preparedQuestionCell.col = -999;
+
+  const slot = getQuestionSlotForCell(row, col);
+  showQuestionLoading(slot);
+
+  let rawQuestion = null;
+  try {
+    rawQuestion = await questionBank.nextQuestion(slot);
+  } catch (error) {
+    console.warn('QuestionBank failed; using bridge fallback question.', error);
+    rawQuestion = pickQuestion();
+  }
+
+  if (token !== STATE.questionRequestToken || !STATE.active || STATE.falling || STATE.won) return;
+
+  const question = normalizeBridgeQuestion(rawQuestion);
+  if (isPlayerOnCell(row, col) && !STATE.moving) {
+    displayQuestion(question);
+    return;
+  }
+
+  if (STATE.moving && isSameCell(STATE.moveTargetCell, row, col)) {
+    STATE.preparedQuestion = question;
+    STATE.preparedQuestionCell.row = row;
+    STATE.preparedQuestionCell.col = col;
+    displayQuestion(question, { locked: true, armTile: false, keepPrepared: true });
+  }
 }
 
 function damageCurrentTile(amount) {
@@ -1538,6 +1605,9 @@ function onAnswer(idx, button) {
 }
 
 function enterPlay(options = {}) {
+  STATE.bridgeLevel = 1;
+  STATE.weakGlassStreakMs = 0;
+  STATE.weakGlassLastT = 0;
   if (options.resetRun) rebuildRun();
   intro.classList.add('hidden');
   pauseMenuEl?.classList.add('hidden');
@@ -1587,7 +1657,7 @@ function showIntro() {
 function pauseGame() {
   if (!STATE.active || STATE.falling || STATE.won || STATE.paused) return;
   STATE.paused = true;
-  STATE.cameraDragging = false;
+  stopCameraDrag();
   pauseMenuEl?.classList.remove('hidden');
   moveControls?.classList.add('locked');
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
@@ -1638,14 +1708,48 @@ settingsBtn?.addEventListener('click', openSettingsFromPause);
 // ====================================================================
 // INPUT
 // ====================================================================
+function rotateCameraByDelta(dx, dy) {
+  STATE.player.yaw -= dx * MOUSE_SENS;
+  STATE.player.pitch -= dy * MOUSE_SENS;
+  STATE.player.pitch = THREE.MathUtils.clamp(STATE.player.pitch, -1.35, 1.35);
+}
+
+function stopCameraDrag() {
+  STATE.cameraDragging = false;
+  STATE.cameraPointerId = null;
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   if (!STATE.active || STATE.paused || STATE.falling || STATE.won) return;
+  if (!e.isPrimary) return;
+  e.preventDefault();
   STATE.cameraDragging = true;
+  STATE.cameraPointerId = e.pointerId;
+  STATE.cameraPointerLastX = e.clientX;
+  STATE.cameraPointerLastY = e.clientY;
   canvas.setPointerCapture?.(e.pointerId);
 });
 
-window.addEventListener('pointerup', () => {
-  STATE.cameraDragging = false;
+window.addEventListener('pointerup', (e) => {
+  if (STATE.cameraPointerId !== null && e.pointerId !== STATE.cameraPointerId) return;
+  stopCameraDrag();
+});
+
+window.addEventListener('pointercancel', (e) => {
+  if (STATE.cameraPointerId !== null && e.pointerId !== STATE.cameraPointerId) return;
+  stopCameraDrag();
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (STATE.paused || STATE.pointerLocked || !STATE.cameraDragging) return;
+  if (STATE.cameraPointerId !== null && e.pointerId !== STATE.cameraPointerId) return;
+  e.preventDefault();
+
+  const dx = e.clientX - STATE.cameraPointerLastX;
+  const dy = e.clientY - STATE.cameraPointerLastY;
+  STATE.cameraPointerLastX = e.clientX;
+  STATE.cameraPointerLastY = e.clientY;
+  rotateCameraByDelta(dx, dy);
 });
 
 document.addEventListener('pointerlockchange', () => {
@@ -1654,10 +1758,8 @@ document.addEventListener('pointerlockchange', () => {
 
 document.addEventListener('mousemove', (e) => {
   if (STATE.paused) return;
-  if (!STATE.pointerLocked && !STATE.cameraDragging) return;
-  STATE.player.yaw -= e.movementX * MOUSE_SENS;
-  STATE.player.pitch -= e.movementY * MOUSE_SENS;
-  STATE.player.pitch = THREE.MathUtils.clamp(STATE.player.pitch, -1.35, 1.35);
+  if (!STATE.pointerLocked) return;
+  rotateCameraByDelta(e.movementX, e.movementY);
 });
 
 const keyMoves = new Map([
@@ -1838,11 +1940,60 @@ function randomFragileDurationMs() {
 }
 
 function armFragileTile(idx, now = performance.now()) {
+  if (STATE.bridgeLevel >= 2) return;
   const meta = STATE.tileMeta[idx];
   if (!meta || !meta.fragile || meta.broken || meta.triggered) return;
   meta.triggered = true;
   meta.triggerTime = now;
   meta.dangerDuration = randomFragileDurationMs();
+}
+
+function resetWeakGlassTimer(t = performance.now()) {
+  STATE.weakGlassStreakMs = 0;
+  STATE.weakGlassLastT = t;
+}
+
+function updateSecondLevelWeakGlassTimer(t) {
+  if (STATE.bridgeLevel !== 2) return 0;
+
+  if (STATE.moving) {
+    STATE.weakGlassLastT = t;
+    return STATE.weakGlassStreakMs > 0
+      ? THREE.MathUtils.clamp(STATE.weakGlassStreakMs / SECOND_LEVEL_FRAGILE_LIMIT_MS, 0, 1) * 0.45
+      : 0;
+  }
+
+  const idx = currentTileIndex();
+  if (idx < 0) {
+    resetWeakGlassTimer(t);
+    return 0;
+  }
+
+  const meta = STATE.tileMeta[idx];
+  if (!meta || !meta.fragile || meta.broken) {
+    resetWeakGlassTimer(t);
+    return 0;
+  }
+
+  if (STATE.weakGlassLastT <= 0) STATE.weakGlassLastT = t;
+  const delta = THREE.MathUtils.clamp(t - STATE.weakGlassLastT, 0, 250);
+  STATE.weakGlassStreakMs += delta;
+  STATE.weakGlassLastT = t;
+
+  const ratio = THREE.MathUtils.clamp(
+    STATE.weakGlassStreakMs / SECOND_LEVEL_FRAGILE_LIMIT_MS,
+    0,
+    1,
+  );
+  meta.crackProgress = Math.max(meta.crackProgress, ratio * 0.95);
+
+  if (STATE.weakGlassStreakMs >= SECOND_LEVEL_FRAGILE_LIMIT_MS) {
+    breakTile(idx);
+    triggerFall();
+    return 1;
+  }
+
+  return 0.12 + ratio * 0.88;
 }
 
 function breakTile(idx) {
@@ -1863,7 +2014,16 @@ function landOnCell(row, col) {
     return;
   }
 
-  startQuestion();
+  if (STATE.preparedQuestion && isSameCell(STATE.preparedQuestionCell, row, col)) {
+    displayQuestion(STATE.preparedQuestion);
+    return;
+  }
+
+  if (STATE.questionLoading && isSameCell(STATE.questionTargetCell, row, col)) {
+    return;
+  }
+
+  startQuestion(row, col);
 }
 
 function startMoveToCell(row, col) {
@@ -1877,6 +2037,7 @@ function startMoveToCell(row, col) {
   STATE.moveTargetCell.row = row;
   STATE.moveTargetCell.col = col;
   setDangerWarning(0);
+  startQuestion(row, col);
 }
 
 function requestMove(command) {
@@ -1996,11 +2157,42 @@ function updateMovementGame(t) {
     }
   }
 
+  warningStrength = Math.max(warningStrength, updateSecondLevelWeakGlassTimer(t));
+  if (STATE.falling) return;
+
   setDangerWarning(warningStrength);
+}
+
+function startSecondLevel() {
+  STATE.bridgeLevel = 2;
+  rebuildRun();
+  intro.classList.add('hidden');
+  pauseMenuEl?.classList.add('hidden');
+  gameoverEl.classList.add('hidden');
+  diaryEl?.classList.add('hidden');
+  hud.classList.remove('hidden');
+  moveControls?.classList.remove('hidden');
+  moveControls?.classList.remove('locked');
+  setQuestionControlsOpen(false);
+  quizEl.classList.add('hidden');
+  STATE.intro = false;
+  STATE.active = true;
+  STATE.paused = false;
+  STATE.falling = false;
+  STATE.won = false;
+  STATE.diaryForced = false;
+  resetWeakGlassTimer(0);
+  setDangerWarning(0);
+  updateHudProgress();
 }
 
 function onWin() {
   if (STATE.won) return;
+  if (STATE.bridgeLevel === 1) {
+    startSecondLevel();
+    return;
+  }
+
   STATE.won = true;
   STATE.active = false;
   STATE.currentQuestion = null;
@@ -2013,7 +2205,7 @@ function onWin() {
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 
   endTitle.textContent = 'Du hast es geschafft!';
-  endText.textContent = 'Семь шагов позади. Стекло осталось целым, город — внизу.';
+  endText.textContent = 'Оба пролёта остались позади. Внизу гаснут окна, а мост больше не спорит с тобой.';
   gameoverEl.classList.remove('hidden');
 }
 
