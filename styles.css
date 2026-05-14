@@ -685,6 +685,45 @@ canvas#scene {
 }
 
 @media (max-width: 760px), (pointer: coarse) {
+  #hud-top,
+  #quiz,
+  #intro,
+  #gameover,
+  #diary,
+  #pause-menu,
+  .move-btn {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  #danger-warning {
+    filter: none;
+    text-shadow: 0 0 18px rgba(255, 45, 55, 0.28);
+    transition: opacity 0.18s ease;
+  }
+  #hud-top {
+    background: rgba(10, 16, 28, 0.82);
+  }
+  #quiz {
+    animation: none;
+    background: rgba(8, 14, 26, 0.92);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.54);
+  }
+  .dashboard-shell,
+  .card {
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.62);
+  }
+  .setup-step {
+    animation: none;
+  }
+  .level-btn,
+  .difficulty-btn,
+  .lexical-btn,
+  .grammar-tag,
+  .ritual-slot,
+  .option,
+  .card button {
+    transition: none;
+  }
   #move-controls.question-open {
     bottom: calc(max(18px, env(safe-area-inset-bottom)) + clamp(220px, 34vh, 320px));
     bottom: calc(max(18px, env(safe-area-inset-bottom)) + clamp(220px, 34dvh, 320px));

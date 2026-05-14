@@ -35,6 +35,35 @@ const SECOND_LEVEL_FRAGILE_LIMIT_MS = 40000;
 const CITY_TARGET_TOP_Y = 60;
 const PLATFORM_Y = 32;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const IS_COARSE_POINTER = window.matchMedia?.('(pointer: coarse)').matches || false;
+const IS_SMALL_VIEWPORT = Math.min(window.innerWidth, window.innerHeight) <= 820;
+const DEVICE_MEMORY_GB = navigator.deviceMemory || 8;
+const HARDWARE_CORES = navigator.hardwareConcurrency || 8;
+const IS_MOBILE_QUALITY =
+  IS_COARSE_POINTER ||
+  IS_SMALL_VIEWPORT ||
+  DEVICE_MEMORY_GB <= 4 ||
+  HARDWARE_CORES <= 4 ||
+  navigator.userAgentData?.mobile === true;
+const QUALITY = {
+  mobile: IS_MOBILE_QUALITY,
+  antialias: !IS_MOBILE_QUALITY,
+  pixelRatioCap: IS_MOBILE_QUALITY ? 1.15 : 2,
+  cameraFar: IS_MOBILE_QUALITY ? 2800 : 8000,
+  fogDensity: IS_MOBILE_QUALITY ? 0.0032 : 0.0026,
+  fallbackBuildingCount: IS_MOBILE_QUALITY ? 72 : 180,
+  loadRealCity: true,
+  maxAviationLights: IS_MOBILE_QUALITY ? 4 : 16,
+  platformPointLights: !IS_MOBILE_QUALITY,
+  tilePointLights: !IS_MOBILE_QUALITY,
+  tileTextureSize: IS_MOBILE_QUALITY ? 256 : 512,
+  crackRays: IS_MOBILE_QUALITY ? 4 : 7,
+  frameIntervalMs: IS_MOBILE_QUALITY ? 1000 / 45 : 0,
+};
+
+function getRenderPixelRatio() {
+  return Math.min(window.devicePixelRatio || 1, QUALITY.pixelRatioCap);
+}
 
 // ====================================================================
 // RENDERER / SCENE / CAMERA
@@ -42,10 +71,10 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: true,
+  antialias: QUALITY.antialias,
   powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -53,13 +82,13 @@ renderer.toneMappingExposure = 0.95;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x04070d);
-scene.fog = new THREE.FogExp2(0x0b1424, 0.0026);
+scene.fog = new THREE.FogExp2(0x0b1424, QUALITY.fogDensity);
 
 const camera = new THREE.PerspectiveCamera(
   74,
   window.innerWidth / window.innerHeight,
   0.1,
-  8000,
+  QUALITY.cameraFar,
 );
 
 // ====================================================================
@@ -175,6 +204,7 @@ const STATE = {
   fallStart: 0,
   paused: false,
   returningFromSettings: false,
+  lastFrameAt: 0,
 
   aviationLights: [],
 };
@@ -225,7 +255,16 @@ function makeFallbackCity() {
   ground.position.y = -200;
   g.add(ground);
 
-  for (let i = 0; i < 180; i++) {
+  const buildingGeom = new THREE.BoxGeometry(1, 1, 1);
+  const buildingMat = new THREE.MeshStandardMaterial({
+    color: 0x1c2030,
+    roughness: 0.7,
+    metalness: 0.3,
+    emissive: 0x4a5a82,
+    emissiveIntensity: QUALITY.mobile ? 0.04 : 0.06,
+  });
+
+  for (let i = 0; i < QUALITY.fallbackBuildingCount; i++) {
     const w = 8 + Math.random() * 18;
     const d = 8 + Math.random() * 18;
     const h = 30 + Math.random() * 220;
@@ -233,14 +272,8 @@ function makeFallbackCity() {
     const z = (Math.random() - 0.5) * 800;
     if (Math.hypot(x, z) < 35) continue;
 
-    const m = new THREE.MeshStandardMaterial({
-      color: 0x1c2030,
-      roughness: 0.7,
-      metalness: 0.3,
-      emissive: 0x4a5a82,
-      emissiveIntensity: 0.06,
-    });
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    const b = new THREE.Mesh(buildingGeom, buildingMat);
+    b.scale.set(w, h, d);
     b.position.set(x, h / 2 - 200, z);
     g.add(b);
   }
@@ -257,6 +290,55 @@ function mountCity(cityRoot) {
   scene.add(cityRoot);
   cityRoot.updateMatrixWorld(true);
   STATE.cityBounds = new THREE.Box3().setFromObject(cityRoot);
+}
+
+function optimizeCityModelForDevice(cityRoot) {
+  const textures = new Set();
+  cityRoot.traverse((child) => {
+    if (!child.isMesh) return;
+
+    child.frustumCulled = true;
+    child.castShadow = false;
+    child.receiveShadow = false;
+
+    const materials = Array.isArray(child.material)
+      ? child.material
+      : [child.material].filter(Boolean);
+    for (const material of materials) {
+      material.dithering = !QUALITY.mobile;
+      material.needsUpdate = true;
+
+      for (const key of [
+        'map',
+        'emissiveMap',
+        'aoMap',
+        'lightMap',
+        'roughnessMap',
+        'metalnessMap',
+        'normalMap',
+        'alphaMap',
+      ]) {
+        if (material[key]) textures.add(material[key]);
+      }
+
+      if (QUALITY.mobile) {
+        material.envMapIntensity = Math.min(material.envMapIntensity || 0.5, 0.45);
+        if (material.normalMap) material.normalMap = null;
+        if (material.roughnessMap) material.roughnessMap = null;
+        if (material.metalnessMap) material.metalnessMap = null;
+      }
+    }
+  });
+
+  textures.forEach((texture) => {
+    texture.anisotropy = QUALITY.mobile ? 1 : renderer.capabilities.getMaxAnisotropy();
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = QUALITY.mobile ? THREE.LinearFilter : THREE.LinearMipmapLinearFilter;
+    if (QUALITY.mobile) texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+  });
+
+  cityRoot.updateMatrixWorld(true);
 }
 
 function bootScene() {
@@ -283,15 +365,13 @@ function loadRealCityInBackground() {
   loader.load(
     'la_night_2k.glb',
     (gltf) => {
-      if (!STATE.intro) {
-        console.info('Real city loaded after intro ended; keeping fallback for this run.');
-        disposeObject(gltf.scene);
-        return;
-      }
       try {
         fitCity(gltf.scene);
+        optimizeCityModelForDevice(gltf.scene);
         mountCity(gltf.scene);
-        console.info('Upgraded to real city.');
+        console.info(QUALITY.mobile
+          ? 'Real city model loaded with mobile optimizations.'
+          : 'Upgraded to real city.');
       } catch (err) {
         console.error('Real city swap failed; keeping fallback.', err);
       }
@@ -314,6 +394,54 @@ function pickPlatformPositions() {
   ];
 }
 
+function makeTransparentGlassMaterial(options) {
+  const {
+    color,
+    roughness,
+    opacity,
+    transmission,
+    thickness,
+    ior,
+    clearcoat,
+    clearcoatRoughness,
+    envMapIntensity,
+    attenuationColor,
+    attenuationDistance,
+    side,
+  } = options;
+
+  if (QUALITY.mobile) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      roughness: Math.max(roughness, 0.24),
+      metalness: 0.0,
+      transparent: true,
+      opacity: Math.min(0.5, opacity * 1.18),
+      side,
+      envMapIntensity: Math.min(envMapIntensity || 0.8, 0.8),
+      depthWrite: false,
+    });
+  }
+
+  return new THREE.MeshPhysicalMaterial({
+    color,
+    roughness,
+    metalness: 0.0,
+    transparent: true,
+    opacity,
+    transmission,
+    thickness,
+    attenuationColor,
+    attenuationDistance,
+    ior,
+    clearcoat,
+    clearcoatRoughness,
+    side,
+    envMapIntensity,
+    depthWrite: false,
+  });
+}
+
 // ====================================================================
 // ROOF PLATFORM
 // ====================================================================
@@ -321,47 +449,43 @@ function makeRoofPlatform(isTarget) {
   const g = new THREE.Group();
   const size = PLATFORM_SIZE;
 
-  const towerGlassMat = new THREE.MeshPhysicalMaterial({
+  const towerGlassMat = makeTransparentGlassMaterial({
     color: 0x7f9fbd,
     roughness: 0.2,
-    metalness: 0.0,
-    transparent: true,
     opacity: 0.24,
     transmission: 0.35,
     thickness: 1.2,
     ior: 1.35,
     clearcoat: 0.6,
+    clearcoatRoughness: 0.08,
     envMapIntensity: 1.2,
-    depthWrite: false,
   });
   const metalMat = new THREE.MeshStandardMaterial({
     color: 0x191b21,
     roughness: 0.42,
     metalness: 0.9,
   });
-  const panelMat = new THREE.MeshPhysicalMaterial({
+  const panelMat = makeTransparentGlassMaterial({
     color: 0x94b4ce,
     roughness: 0.18,
-    metalness: 0.0,
-    transparent: true,
     opacity: 0.28,
     transmission: 0.45,
     thickness: 0.4,
+    ior: 1.35,
     clearcoat: 0.8,
+    clearcoatRoughness: 0.06,
     envMapIntensity: 1.4,
-    depthWrite: false,
   });
-  const darkPanelMat = new THREE.MeshPhysicalMaterial({
+  const darkPanelMat = makeTransparentGlassMaterial({
     color: 0x6f879d,
     roughness: 0.24,
-    metalness: 0.0,
-    transparent: true,
     opacity: 0.18,
     transmission: 0.35,
     thickness: 0.4,
+    ior: 1.35,
     clearcoat: 0.65,
+    clearcoatRoughness: 0.08,
     envMapIntensity: 1.1,
-    depthWrite: false,
   });
 
   // A glass shaft keeps the spawn building readable without blocking the city below.
@@ -432,9 +556,13 @@ function makeRoofPlatform(isTarget) {
   aviBulb.position.set(size / 2 - 0.6, 0.85, size / 2 - 0.6);
   g.add(aviBulb);
 
-  const aviLight = new THREE.PointLight(0xff3030, 0.5, 6);
-  aviLight.position.copy(aviBulb.position);
-  g.add(aviLight);
+  const aviLight = QUALITY.platformPointLights
+    ? new THREE.PointLight(0xff3030, 0.5, 6)
+    : null;
+  if (aviLight) {
+    aviLight.position.copy(aviBulb.position);
+    g.add(aviLight);
+  }
   STATE.aviationLights.push({
     bulb: aviBulb,
     light: aviLight,
@@ -455,9 +583,11 @@ function makeRoofPlatform(isTarget) {
       g.add(s);
     }
 
-    const pl = new THREE.PointLight(0x6da3e6, 0.4, 6);
-    pl.position.set(0, 1.2, 0);
-    g.add(pl);
+    if (QUALITY.platformPointLights) {
+      const pl = new THREE.PointLight(0x6da3e6, 0.4, 6);
+      pl.position.set(0, 1.2, 0);
+      g.add(pl);
+    }
   }
 
   return g;
@@ -471,23 +601,24 @@ let tileEdgeGlowTexture = null;
 function getTileEdgeGlowTexture() {
   if (tileEdgeGlowTexture) return tileEdgeGlowTexture;
 
-  const size = 512;
+  const size = QUALITY.tileTextureSize;
   const c = document.createElement('canvas');
   c.width = size;
   c.height = size;
   const ctx = c.getContext('2d');
-  const inset = 58;
+  const inset = Math.round(size * 0.113);
   const rectSize = size - inset * 2;
 
   ctx.clearRect(0, 0, size, size);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
-  for (let i = 0; i < 20; i++) {
-    const p = i / 17;
+  const rings = QUALITY.mobile ? 10 : 20;
+  for (let i = 0; i < rings; i++) {
+    const p = i / Math.max(1, rings - 1);
     const alpha = 0.042 * (1 - p) ** 1.45;
     ctx.strokeStyle = `rgba(112, 246, 255, ${alpha})`;
-    ctx.lineWidth = 108 - p * 92;
+    ctx.lineWidth = size * 0.21 - p * size * 0.18;
     ctx.strokeRect(inset, inset, rectSize, rectSize);
   }
 
@@ -501,9 +632,14 @@ function getTileEdgeGlowTexture() {
 
   tileEdgeGlowTexture = new THREE.CanvasTexture(c);
   tileEdgeGlowTexture.colorSpace = THREE.SRGBColorSpace;
-  tileEdgeGlowTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  tileEdgeGlowTexture.generateMipmaps = !QUALITY.mobile;
+  tileEdgeGlowTexture.minFilter = QUALITY.mobile
+    ? THREE.LinearFilter
+    : THREE.LinearMipmapLinearFilter;
   tileEdgeGlowTexture.magFilter = THREE.LinearFilter;
-  tileEdgeGlowTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tileEdgeGlowTexture.anisotropy = QUALITY.mobile
+    ? 1
+    : renderer.capabilities.getMaxAnisotropy();
   tileEdgeGlowTexture.needsUpdate = true;
   return tileEdgeGlowTexture;
 }
@@ -514,11 +650,9 @@ function makeGlassTile(fragile) {
   const roughness = 0.035;
   const opacity = 0.16;
 
-  const glassMat = new THREE.MeshPhysicalMaterial({
+  const glassMat = makeTransparentGlassMaterial({
     color: baseColor,
-    metalness: 0.0,
     roughness,
-    transparent: true,
     opacity,
     transmission: 0.72,
     thickness: 0.38,
@@ -529,7 +663,6 @@ function makeGlassTile(fragile) {
     clearcoatRoughness: 0.04,
     side: THREE.DoubleSide,
     envMapIntensity: 1.8,
-    depthWrite: false,
   });
 
   const glass = new THREE.Mesh(
@@ -566,39 +699,43 @@ function makeGlassTile(fragile) {
   g.add(edgeGlow);
   g.userData.edgeGlow = edgeGlow;
 
-  const softLight = new THREE.PointLight(TILE_NEON_COLOR, 0.052, 2.8, 2.0);
-  softLight.position.set(0, 0.24, 0);
-  g.add(softLight);
-  g.userData.neonLights.push(softLight);
+  if (QUALITY.tilePointLights) {
+    const softLight = new THREE.PointLight(TILE_NEON_COLOR, 0.052, 2.8, 2.0);
+    softLight.position.set(0, 0.24, 0);
+    g.add(softLight);
+    g.userData.neonLights.push(softLight);
+  }
 
-  const mountMat = new THREE.MeshStandardMaterial({
-    color: 0x1d1f25,
-    roughness: 0.4,
-    metalness: 0.92,
-  });
-  const corners = [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ];
-  for (const [sx, sz] of corners) {
-    const m = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8),
-      mountMat,
-    );
-    m.position.set(
-      sx * (TILE_SIZE / 2 - 0.1),
-      -TILE_THICKNESS / 2 - 0.06,
-      sz * (TILE_SIZE / 2 - 0.1),
-    );
-    g.add(m);
+  if (!QUALITY.mobile) {
+    const mountMat = new THREE.MeshStandardMaterial({
+      color: 0x1d1f25,
+      roughness: 0.4,
+      metalness: 0.92,
+    });
+    const corners = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    for (const [sx, sz] of corners) {
+      const m = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8),
+        mountMat,
+      );
+      m.position.set(
+        sx * (TILE_SIZE / 2 - 0.1),
+        -TILE_THICKNESS / 2 - 0.06,
+        sz * (TILE_SIZE / 2 - 0.1),
+      );
+      g.add(m);
+    }
   }
 
   const cracks = new THREE.Group();
   const ny = TILE_THICKNESS / 2 + 0.0015;
-  for (let r = 0; r < 7; r++) {
-    const angle0 = (r / 7) * Math.PI * 2 + Math.random() * 0.4;
+  for (let r = 0; r < QUALITY.crackRays; r++) {
+    const angle0 = (r / QUALITY.crackRays) * Math.PI * 2 + Math.random() * 0.4;
     const pts = [new THREE.Vector3(0, ny, 0)];
     let x = 0;
     let z = 0;
@@ -870,13 +1007,17 @@ function softRestart() {
 }
 
 function disposeObject(obj) {
+  const geometries = new Set();
+  const materials = new Set();
   obj.traverse((child) => {
-    if (child.geometry) child.geometry.dispose();
+    if (child.geometry) geometries.add(child.geometry);
     if (child.material) {
-      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-      else child.material.dispose();
+      if (Array.isArray(child.material)) child.material.forEach((m) => materials.add(m));
+      else materials.add(child.material);
     }
   });
+  geometries.forEach((geometry) => geometry.dispose());
+  materials.forEach((material) => material.dispose());
 }
 
 function resetPlayer() {
@@ -909,13 +1050,16 @@ function resetPlayer() {
 // AVIATION LIGHTS
 // ====================================================================
 function spawnAviationLightsOnSkyline() {
+  if (QUALITY.maxAviationLights <= 0) return;
+
   const bbox = new THREE.Box3().setFromObject(STATE.cityRoot);
   const ray = new THREE.Raycaster();
   ray.ray.direction.set(0, -1, 0);
 
   let placed = 0;
-  const maxLights = 16;
-  for (let attempt = 0; attempt < 80 && placed < maxLights; attempt++) {
+  const maxLights = QUALITY.maxAviationLights;
+  const maxAttempts = QUALITY.mobile ? 32 : 80;
+  for (let attempt = 0; attempt < maxAttempts && placed < maxLights; attempt++) {
     const x = THREE.MathUtils.lerp(
       bbox.min.x + 30,
       bbox.max.x - 30,
@@ -945,9 +1089,13 @@ function spawnAviationLightsOnSkyline() {
     bulb.position.set(x, y, z);
     scene.add(bulb);
 
-    const pl = new THREE.PointLight(color, 0.5, 12);
-    pl.position.copy(bulb.position);
-    scene.add(pl);
+    const pl = QUALITY.platformPointLights
+      ? new THREE.PointLight(color, 0.5, 12)
+      : null;
+    if (pl) {
+      pl.position.copy(bulb.position);
+      scene.add(pl);
+    }
 
     STATE.aviationLights.push({
       bulb,
@@ -2244,7 +2392,17 @@ function triggerFall() {
 // ====================================================================
 const clock = new THREE.Clock();
 
-function animate() {
+function animate(frameTime = performance.now()) {
+  if (
+    QUALITY.frameIntervalMs > 0 &&
+    STATE.lastFrameAt > 0 &&
+    frameTime - STATE.lastFrameAt < QUALITY.frameIntervalMs
+  ) {
+    requestAnimationFrame(animate);
+    return;
+  }
+  STATE.lastFrameAt = frameTime;
+
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = performance.now();
 
@@ -2253,7 +2411,7 @@ function animate() {
     const intensity = a.white
       ? 0.08 + Math.pow(v, 6) * 1.35
       : 0.2 + v * 0.8;
-    a.light.intensity = intensity * 0.7;
+    if (a.light) a.light.intensity = intensity * 0.7;
     if (a.white) {
       a.bulb.material.color.setRGB(intensity, intensity, intensity);
     } else {
@@ -2356,6 +2514,7 @@ animate();
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(getRenderPixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
