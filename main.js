@@ -191,6 +191,7 @@ const STATE = {
   moveFrom: new THREE.Vector3(),
   moveTo: new THREE.Vector3(),
   moveTargetCell: { row: -1, col: Math.floor(BRIDGE_COLS / 2) },
+  answeredMoveCell: { row: -999, col: -999 },
   dangerWarningStrength: 0,
   bridgeLevel: 1,
   weakGlassStreakMs: 0,
@@ -1038,6 +1039,8 @@ function resetPlayer() {
   STATE.playerCell.col = Math.floor(BRIDGE_COLS / 2);
   STATE.moveTargetCell.row = STATE.playerCell.row;
   STATE.moveTargetCell.col = STATE.playerCell.col;
+  STATE.answeredMoveCell.row = -999;
+  STATE.answeredMoveCell.col = -999;
   STATE.player.pos.copy(cellWorldPosition(STATE.playerCell.row, STATE.playerCell.col));
   STATE.player.yaw = Math.atan2(-STATE.forwardDir.x, -STATE.forwardDir.z);
   STATE.player.pitch = -0.05;
@@ -1484,6 +1487,9 @@ function escapeHtml(value) {
 
 function recordQuestionOutcome(question, correct) {
   const meta = question?.meta;
+  const targetSlot =
+    getQuestionSlotForCell(STATE.questionTargetCell.row, STATE.questionTargetCell.col) ||
+    getCurrentQuestionSlot();
   STATE.questionsAnswered += 1;
   if (correct) STATE.questionsCorrect += 1;
 
@@ -1496,7 +1502,7 @@ function recordQuestionOutcome(question, correct) {
     id: `${performance.now()}:${STATE.diaryEntries.length}`,
     correct,
     level: meta?.level || STATE.questionSettings?.langLevel || '',
-    topic: meta?.topic || getCurrentQuestionSlot()?.grammarTopic || '',
+    topic: meta?.topic || targetSlot?.grammarTopic || '',
     lexicalTopic: meta?.lexicalTopic || STATE.questionSettings?.lexicalTopic || '',
     text: meta?.text || '',
     display,
@@ -1560,6 +1566,8 @@ function clearQuestion() {
   STATE.preparedQuestion = null;
   STATE.preparedQuestionCell.row = -999;
   STATE.preparedQuestionCell.col = -999;
+  STATE.answeredMoveCell.row = -999;
+  STATE.answeredMoveCell.col = -999;
   quizEl.classList.add('hidden');
   setQuestionControlsOpen(false);
   moveControls?.classList.remove('locked');
@@ -1614,10 +1622,6 @@ function isSameCell(cell, row, col) {
   return cell.row === row && cell.col === col;
 }
 
-function isPlayerOnCell(row, col) {
-  return STATE.playerCell.row === row && STATE.playerCell.col === col;
-}
-
 function displayQuestion(question, options = {}) {
   const locked = Boolean(options.locked);
   const armTile = options.armTile !== false;
@@ -1662,7 +1666,7 @@ function displayQuestion(question, options = {}) {
 
 async function startQuestion(row = STATE.playerCell.row, col = STATE.playerCell.col) {
   if (!STATE.active || STATE.falling || STATE.won) return;
-  if (row < 0 || row >= BRIDGE_ROWS) return;
+  if (row < 0 || row > BRIDGE_ROWS) return;
 
   if (STATE.preparedQuestion && isSameCell(STATE.preparedQuestionCell, row, col) && !STATE.moving) {
     displayQuestion(STATE.preparedQuestion);
@@ -1690,7 +1694,7 @@ async function startQuestion(row = STATE.playerCell.row, col = STATE.playerCell.
   if (token !== STATE.questionRequestToken || !STATE.active || STATE.falling || STATE.won) return;
 
   const question = normalizeBridgeQuestion(rawQuestion);
-  if (isPlayerOnCell(row, col) && !STATE.moving) {
+  if (!STATE.moving) {
     displayQuestion(question);
     return;
   }
@@ -1724,6 +1728,10 @@ function onAnswer(idx, button) {
   if (!STATE.active || STATE.questionLocked || !STATE.currentQuestion) return;
 
   const answeredQuestion = STATE.currentQuestion;
+  const target = {
+    row: STATE.questionTargetCell.row,
+    col: STATE.questionTargetCell.col,
+  };
   const correct = answeredQuestion.correct === idx;
   STATE.questionLocked = true;
   setOptionsDisabled(true);
@@ -1734,6 +1742,9 @@ function onAnswer(idx, button) {
     setTimeout(() => {
       if (!STATE.active || STATE.falling || STATE.won) return;
       clearQuestion();
+      if (isCellInBounds(target.row, target.col) && target.row >= 0) {
+        startMoveToCell(target.row, target.col, { questionAnswered: true });
+      }
     }, 220);
     return;
   }
@@ -1748,7 +1759,7 @@ function onAnswer(idx, button) {
 
   setTimeout(() => {
     if (!STATE.active || STATE.falling || STATE.won) return;
-    startQuestion();
+    startQuestion(target.row, target.col);
   }, 620);
 }
 
@@ -2162,6 +2173,14 @@ function landOnCell(row, col) {
     return;
   }
 
+  if (isSameCell(STATE.answeredMoveCell, row, col)) {
+    STATE.answeredMoveCell.row = -999;
+    STATE.answeredMoveCell.col = -999;
+    moveControls?.classList.remove('locked');
+    setDangerWarning(0);
+    return;
+  }
+
   if (STATE.preparedQuestion && isSameCell(STATE.preparedQuestionCell, row, col)) {
     displayQuestion(STATE.preparedQuestion);
     return;
@@ -2174,14 +2193,31 @@ function landOnCell(row, col) {
   startQuestion(row, col);
 }
 
-function startMoveToCell(row, col) {
+function startMoveToCell(row, col, options = {}) {
   if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
 
-  clearQuestion();
   STATE.moving = true;
   STATE.moveStart = performance.now();
   STATE.moveFrom.copy(STATE.player.pos);
   STATE.moveTo.copy(cellWorldPosition(row, col));
+  STATE.moveTargetCell.row = row;
+  STATE.moveTargetCell.col = col;
+  if (options.questionAnswered) {
+    STATE.answeredMoveCell.row = row;
+    STATE.answeredMoveCell.col = col;
+  } else {
+    STATE.answeredMoveCell.row = -999;
+    STATE.answeredMoveCell.col = -999;
+  }
+  moveControls?.classList.add('locked');
+  setDangerWarning(0);
+}
+
+function prepareMoveQuestion(row, col) {
+  if (!STATE.active || STATE.falling || STATE.won || STATE.moving) return;
+  if (row < 0 || row > BRIDGE_ROWS) return;
+
+  clearQuestion();
   STATE.moveTargetCell.row = row;
   STATE.moveTargetCell.col = col;
   setDangerWarning(0);
@@ -2194,7 +2230,7 @@ function requestMove(command) {
 
   const target = cameraRelativeTargetCell(command);
   if (!target) return;
-  startMoveToCell(target.row, target.col);
+  prepareMoveQuestion(target.row, target.col);
 }
 
 function updateGame(t) {
