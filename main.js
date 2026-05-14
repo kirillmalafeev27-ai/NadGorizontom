@@ -39,27 +39,113 @@ const IS_COARSE_POINTER = window.matchMedia?.('(pointer: coarse)').matches || fa
 const IS_SMALL_VIEWPORT = Math.min(window.innerWidth, window.innerHeight) <= 820;
 const DEVICE_MEMORY_GB = navigator.deviceMemory || 8;
 const HARDWARE_CORES = navigator.hardwareConcurrency || 8;
-const IS_MOBILE_QUALITY =
-  IS_COARSE_POINTER ||
-  IS_SMALL_VIEWPORT ||
-  DEVICE_MEMORY_GB <= 4 ||
-  HARDWARE_CORES <= 4 ||
-  navigator.userAgentData?.mobile === true;
+const IS_MOBILE_UA = navigator.userAgentData?.mobile === true;
+
+function detectGpuTier() {
+  try {
+    const probe = document.createElement('canvas').getContext('webgl', {
+      failIfMajorPerformanceCaveat: false,
+    });
+    if (!probe) return { rendererStr: '', isWeak: true, isSoftware: true };
+    const dbg = probe.getExtension('WEBGL_debug_renderer_info');
+    const rendererStr = dbg
+      ? String(probe.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '')
+      : '';
+    const r = rendererStr.toLowerCase();
+    const isSoftware =
+      r.includes('swiftshader') ||
+      r.includes('llvmpipe') ||
+      r.includes('software') ||
+      r.includes('microsoft basic') ||
+      r.includes('mesa offscreen');
+    const isWeak =
+      isSoftware ||
+      r.includes('intel(r) hd graphics') ||
+      r.includes('intel hd graphics') ||
+      r.includes('intel(r) uhd graphics 6') ||
+      r.includes('mali-') ||
+      r.includes('adreno (tm) 3') ||
+      r.includes('adreno (tm) 4') ||
+      r.includes('powervr');
+    return { rendererStr, isWeak, isSoftware };
+  } catch (_err) {
+    return { rendererStr: '', isWeak: false, isSoftware: false };
+  }
+}
+
+const GPU_INFO = detectGpuTier();
+
+function readQualityOverride() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const q = (params.get('quality') || params.get('q') || '').toLowerCase();
+    if (q === 'low' || q === 'medium' || q === 'high' || q === 'auto') {
+      if (q === 'auto') {
+        window.localStorage?.removeItem('ng:quality');
+      } else {
+        window.localStorage?.setItem('ng:quality', q);
+      }
+      return q === 'auto' ? null : q;
+    }
+    const stored = window.localStorage?.getItem('ng:quality');
+    if (stored === 'low' || stored === 'medium' || stored === 'high') return stored;
+  } catch (_err) {
+    // localStorage may be unavailable; fall back to auto detection.
+  }
+  return null;
+}
+
+function detectQualityTier() {
+  const override = readQualityOverride();
+  if (override) return override;
+
+  if (GPU_INFO.isSoftware) return 'low';
+  if (DEVICE_MEMORY_GB <= 2) return 'low';
+  if (HARDWARE_CORES <= 2) return 'low';
+  if (GPU_INFO.isWeak && (DEVICE_MEMORY_GB <= 4 || HARDWARE_CORES <= 4)) return 'low';
+
+  if (
+    IS_COARSE_POINTER ||
+    IS_SMALL_VIEWPORT ||
+    IS_MOBILE_UA ||
+    DEVICE_MEMORY_GB <= 4 ||
+    HARDWARE_CORES <= 4 ||
+    GPU_INFO.isWeak
+  ) {
+    return 'medium';
+  }
+
+  return 'high';
+}
+
+const QUALITY_TIER = detectQualityTier();
+const IS_LOW_QUALITY = QUALITY_TIER === 'low';
+const IS_MOBILE_QUALITY = QUALITY_TIER !== 'high';
+
 const QUALITY = {
+  tier: QUALITY_TIER,
   mobile: IS_MOBILE_QUALITY,
-  antialias: !IS_MOBILE_QUALITY,
-  pixelRatioCap: IS_MOBILE_QUALITY ? 1.15 : 2,
-  cameraFar: IS_MOBILE_QUALITY ? 2800 : 8000,
-  fogDensity: IS_MOBILE_QUALITY ? 0.0032 : 0.0026,
-  fallbackBuildingCount: IS_MOBILE_QUALITY ? 72 : 180,
-  loadRealCity: true,
-  maxAviationLights: IS_MOBILE_QUALITY ? 4 : 16,
+  low: IS_LOW_QUALITY,
+  antialias: QUALITY_TIER === 'high',
+  pixelRatioCap: IS_LOW_QUALITY ? 1 : IS_MOBILE_QUALITY ? 1.15 : 2,
+  cameraFar: IS_LOW_QUALITY ? 1600 : IS_MOBILE_QUALITY ? 2800 : 8000,
+  fogDensity: IS_LOW_QUALITY ? 0.0048 : IS_MOBILE_QUALITY ? 0.0032 : 0.0026,
+  fallbackBuildingCount: IS_LOW_QUALITY ? 32 : IS_MOBILE_QUALITY ? 72 : 180,
+  loadRealCity: !IS_LOW_QUALITY,
+  maxAviationLights: IS_LOW_QUALITY ? 0 : IS_MOBILE_QUALITY ? 4 : 16,
   platformPointLights: !IS_MOBILE_QUALITY,
   tilePointLights: !IS_MOBILE_QUALITY,
-  tileTextureSize: IS_MOBILE_QUALITY ? 256 : 512,
-  crackRays: IS_MOBILE_QUALITY ? 4 : 7,
-  frameIntervalMs: IS_MOBILE_QUALITY ? 1000 / 45 : 0,
+  tileTextureSize: IS_LOW_QUALITY ? 128 : IS_MOBILE_QUALITY ? 256 : 512,
+  crackRays: IS_LOW_QUALITY ? 3 : IS_MOBILE_QUALITY ? 4 : 7,
+  frameIntervalMs: IS_LOW_QUALITY ? 1000 / 30 : IS_MOBILE_QUALITY ? 1000 / 45 : 0,
+  altitudeUpdateInterval: IS_LOW_QUALITY ? 6 : IS_MOBILE_QUALITY ? 3 : 1,
 };
+
+if (typeof console !== 'undefined' && console.info) {
+  console.info(
+    `[NadGorizontom] quality=${QUALITY.tier} gpu="${GPU_INFO.rendererStr || 'unknown'}"`,
+  );
+}
 
 function getRenderPixelRatio() {
   return Math.min(window.devicePixelRatio || 1, QUALITY.pixelRatioCap);
@@ -72,12 +158,17 @@ const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: QUALITY.antialias,
-  powerPreference: 'high-performance',
+  powerPreference: QUALITY.low ? 'low-power' : 'high-performance',
+  stencil: false,
+  depth: true,
+  alpha: false,
 });
 renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMapping = QUALITY.low
+  ? THREE.LinearToneMapping
+  : THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.95;
 
 const scene = new THREE.Scene();
@@ -100,9 +191,11 @@ const moon = new THREE.DirectionalLight(0xb8caea, 0.6);
 moon.position.set(220, 480, 180);
 scene.add(moon);
 
-const warmBounce = new THREE.HemisphereLight(0xff9b58, 0x000000, 0.18);
-warmBounce.position.set(0, -1, 0);
-scene.add(warmBounce);
+if (!QUALITY.low) {
+  const warmBounce = new THREE.HemisphereLight(0xff9b58, 0x000000, 0.18);
+  warmBounce.position.set(0, -1, 0);
+  scene.add(warmBounce);
+}
 
 const envScene = new THREE.Scene();
 {
@@ -2427,6 +2520,11 @@ function triggerFall() {
 // RENDER LOOP
 // ====================================================================
 const clock = new THREE.Clock();
+const TMP_WHITE = new THREE.Color(0xffffff);
+const TMP_LOOK_DIR = new THREE.Vector3();
+const TMP_LOOK_TARGET = new THREE.Vector3();
+let frameCount = 0;
+let lastAltitudeText = '';
 
 function animate(frameTime = performance.now()) {
   if (
@@ -2441,6 +2539,7 @@ function animate(frameTime = performance.now()) {
 
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = performance.now();
+  frameCount++;
 
   for (const a of STATE.aviationLights) {
     const v = (Math.sin(t * 0.0025 + a.phase) + 1) * 0.5;
@@ -2457,8 +2556,10 @@ function animate(frameTime = performance.now()) {
 
   updateMovementGame(t);
 
-  for (let i = 0; i < STATE.tiles.length; i++) {
-    const tile = STATE.tiles[i];
+  const skipNeonPulse = QUALITY.low && (frameCount & 1) === 0;
+  const tiles = STATE.tiles;
+  for (let i = 0; i < tiles.length; i++) {
+    const tile = tiles[i];
     const meta = STATE.tileMeta[i];
 
     if (STATE.active && !STATE.paused && meta.triggered && meta.fragile && !meta.broken) {
@@ -2479,37 +2580,53 @@ function animate(frameTime = performance.now()) {
         0,
         tile.userData.glassMat.opacity - dt * 0.8,
       );
-      tile.userData.neonMats?.forEach((mat, idx) => {
-        mat.opacity = Math.max(0, mat.opacity - dt * (idx === 0 ? 0.55 : 0.35));
-      });
-      tile.userData.neonLights?.forEach((light) => {
-        light.intensity = Math.max(0, light.intensity - dt * 0.08);
-      });
+      const neonMats = tile.userData.neonMats;
+      if (neonMats) {
+        for (let m = 0; m < neonMats.length; m++) {
+          neonMats[m].opacity = Math.max(
+            0,
+            neonMats[m].opacity - dt * (m === 0 ? 0.55 : 0.35),
+          );
+        }
+      }
+      const neonLights = tile.userData.neonLights;
+      if (neonLights) {
+        for (let l = 0; l < neonLights.length; l++) {
+          neonLights[l].intensity = Math.max(0, neonLights[l].intensity - dt * 0.08);
+        }
+      }
       continue;
     }
 
     const cp = meta.crackProgress;
-    const neonPulse = (Math.sin(t * 0.0022 + i * 0.7) + 1) * 0.5;
-    if (tile.userData.neonMats?.length) {
-      tile.userData.neonMats[0].opacity = Math.min(0.82, 0.54 + neonPulse * 0.1 + cp * 0.12);
-    }
-    if (tile.userData.neonLights?.length) {
-      tile.userData.neonLights[0].intensity = 0.032 + neonPulse * 0.018 + cp * 0.025;
+
+    if (!skipNeonPulse) {
+      const neonPulse = (Math.sin(t * 0.0022 + i * 0.7) + 1) * 0.5;
+      const neonMats = tile.userData.neonMats;
+      if (neonMats && neonMats.length) {
+        neonMats[0].opacity = Math.min(0.82, 0.54 + neonPulse * 0.1 + cp * 0.12);
+      }
+      const neonLights = tile.userData.neonLights;
+      if (neonLights && neonLights.length) {
+        neonLights[0].intensity = 0.032 + neonPulse * 0.018 + cp * 0.025;
+      }
     }
 
     if (cp > 0) {
       const cracks = tile.userData.cracks;
-      cracks.children.forEach((line, idx) => {
-        line.material.opacity = Math.min(0.95, cp * (0.4 + (idx % 3) * 0.2));
-      });
+      const lines = cracks.children;
+      for (let idx = 0; idx < lines.length; idx++) {
+        lines[idx].material.opacity = Math.min(0.95, cp * (0.4 + (idx % 3) * 0.2));
+      }
 
       const mat = tile.userData.glassMat;
       const base = tile.userData.baseColor;
-      const white = new THREE.Color(0xffffff);
-      mat.color.copy(base).lerp(white, cp * 0.55);
+      mat.color.copy(base).lerp(TMP_WHITE, cp * 0.55);
       mat.opacity = THREE.MathUtils.lerp(0.16, 0.62, cp);
       mat.roughness = THREE.MathUtils.lerp(0.035, 0.58, cp);
-      mat.transmission = THREE.MathUtils.lerp(0.72, 0.08, cp);
+      if ('transmission' in mat) {
+        mat.transmission = THREE.MathUtils.lerp(0.72, 0.08, cp);
+      }
       tile.position.y =
         tile.userData.baseY - cp * 0.05 - Math.sin(t * 0.02) * cp * 0.005;
     }
@@ -2521,13 +2638,14 @@ function animate(frameTime = performance.now()) {
 
     const yaw = STATE.player.yaw;
     const pitch = STATE.player.pitch;
-    const lookDir = new THREE.Vector3(
-      -Math.sin(yaw) * Math.cos(pitch),
+    const cosPitch = Math.cos(pitch);
+    TMP_LOOK_DIR.set(
+      -Math.sin(yaw) * cosPitch,
       Math.sin(pitch),
-      -Math.cos(yaw) * Math.cos(pitch),
+      -Math.cos(yaw) * cosPitch,
     );
-    camera.lookAt(camera.position.clone().add(lookDir));
-    altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
+    TMP_LOOK_TARGET.copy(camera.position).add(TMP_LOOK_DIR);
+    camera.lookAt(TMP_LOOK_TARGET);
   } else {
     STATE.fallVel.y -= 12 * dt;
     STATE.player.pos.addScaledVector(STATE.fallVel, dt * 6);
@@ -2535,7 +2653,14 @@ function animate(frameTime = performance.now()) {
     camera.position.y += PLAYER_EYE;
     camera.rotation.x -= dt * 0.6;
     camera.rotation.z += dt * 0.25;
-    altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
+  }
+
+  if (frameCount % QUALITY.altitudeUpdateInterval === 0) {
+    const next = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
+    if (next !== lastAltitudeText) {
+      altitudeEl.textContent = next;
+      lastAltitudeText = next;
+    }
   }
 
   renderer.render(scene, camera);
@@ -2558,5 +2683,9 @@ window.addEventListener('resize', () => {
 // BOOT
 // ====================================================================
 if (bootScene()) {
-  loadRealCityInBackground();
+  if (QUALITY.loadRealCity) {
+    loadRealCityInBackground();
+  } else {
+    console.info('[NadGorizontom] Skipping real city load on low quality tier.');
+  }
 }
