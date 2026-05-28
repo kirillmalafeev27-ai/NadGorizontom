@@ -191,7 +191,7 @@ function createDuelRoom(settings = {}, hostName = '') {
     updatedAt: Date.now(),
     revision: 1,
     phase: 'waiting',
-    turn: 'p1',
+    turn: null,
     winner: null,
     settings: {
       level: settings.level || settings.langLevel || 'A2',
@@ -245,8 +245,7 @@ function resetDuelRound(room) {
   if (room.players.p2) room.players.p2.guarded = false;
 }
 
-function finishDuelTurn(room, nextTurn) {
-  room.turn = nextTurn || otherDuelPlayerId(room.turn);
+function markDuelChanged(room) {
   room.revision += 1;
   touchDuelRoom(room);
 }
@@ -389,7 +388,6 @@ function applyDuelPenalty(room, playerId, correctBefore) {
 function applyDuelAction(room, playerId, action = {}) {
   if (!room.players[playerId]) return { ok: false, error: 'unknown player' };
   if (room.phase !== 'playing') return { ok: false, error: 'room is not playing' };
-  if (room.turn !== playerId) return { ok: false, error: 'not your turn' };
 
   let changed = false;
   if (action.type === 'move') {
@@ -410,11 +408,7 @@ function applyDuelAction(room, playerId, action = {}) {
   }
 
   if (!changed) return { ok: false, error: 'illegal action' };
-  if (room.phase !== 'finished') finishDuelTurn(room, otherDuelPlayerId(playerId));
-  else {
-    room.revision += 1;
-    touchDuelRoom(room);
-  }
+  markDuelChanged(room);
   return { ok: true, state: publicDuelState(room) };
 }
 
@@ -464,8 +458,9 @@ async function handleDuelApi(req, res) {
     const positions = duelStartPositions();
     room.players.p2 = makeDuelPlayer('p2', body.name || 'Spieler 2', positions.p2);
     room.phase = 'playing';
-    room.lastEvent = `${room.players.p2.name} подключился. Ходит ${room.players.p1.name}.`;
-    finishDuelTurn(room, 'p1');
+    room.turn = null;
+    room.lastEvent = `${room.players.p2.name} подключился. Оба игрока на стекле.`;
+    markDuelChanged(room);
     sendJson(res, 200, { roomId: room.id, playerId: 'p2', state: publicDuelState(room) });
     return;
   }

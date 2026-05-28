@@ -1667,19 +1667,25 @@ function applyDuelState(state) {
       : 'ожидаем второго игрока';
   }
   if (duelTurnLabel) {
-    const turnName = state.players?.[state.turn]?.name || state.turn || '—';
     duelTurnLabel.textContent = state.phase === 'finished'
       ? `победил ${state.players?.[state.winner]?.name || state.winner}`
-      : `ход: ${turnName}`;
+      : state.phase === 'playing'
+        ? 'оба на ходу'
+        : 'ожидание';
   }
 
   syncDuelMannequins(state);
   renderDuelTurnPanel();
 }
 
-function isMyDuelTurn() {
+function canPlayDuelNow() {
   const state = STATE.duel.state;
-  return Boolean(state && state.phase === 'playing' && state.turn === STATE.duel.playerId);
+  return Boolean(
+    state &&
+    state.phase === 'playing' &&
+    state.players?.[STATE.duel.playerId] &&
+    state.players?.[duelOpponentId()]
+  );
 }
 
 function renderDuelTurnPanel() {
@@ -1705,21 +1711,12 @@ function renderDuelTurnPanel() {
     return;
   }
 
-  if (!isMyDuelTurn()) {
-    duelSeriesEl?.classList.add('hidden');
-    duelClaimEl?.classList.add('hidden');
-    duelActionPanel?.classList.add('hidden');
-    if (duelStatus) duelStatus.textContent = `${state.lastEvent || ''} Ждём ход соперника.`;
-    duelRiskLines?.classList.add('hidden');
-    return;
-  }
-
   if (STATE.duel.currentQuestion || STATE.duel.actionPower > 0 || STATE.duel.seriesCorrect > 0) return;
 
   duelSeriesEl?.classList.add('hidden');
   duelClaimEl?.classList.add('hidden');
   duelActionPanel?.classList.add('hidden');
-  if (duelStatus) duelStatus.textContent = `${state.lastEvent || ''} Твой ход: выбери линию риска.`;
+  if (duelStatus) duelStatus.textContent = `${state.lastEvent || ''} Выбери линию риска и дави темп.`;
   duelRiskLines?.classList.remove('hidden');
 }
 
@@ -1732,7 +1729,7 @@ function duelQuestionSlot() {
 }
 
 async function startDuelSeries(line) {
-  if (!isMyDuelTurn()) return;
+  if (!canPlayDuelNow()) return;
   STATE.duel.seriesLine = line;
   STATE.duel.seriesStep = 1;
   STATE.duel.seriesCorrect = 0;
@@ -1792,6 +1789,7 @@ async function answerDuelQuestion(index, button) {
       correctBefore: STATE.duel.seriesCorrect,
     });
     clearDuelSeries();
+    renderDuelTurnPanel();
     return;
   }
 
@@ -1939,7 +1937,7 @@ async function sendDuelAction(action) {
     applyDuelState(data.state);
     return true;
   } catch (error) {
-    if (duelStatus) duelStatus.textContent = `Ход не принят: ${error.message}`;
+    if (duelStatus) duelStatus.textContent = `Действие не принято: ${error.message}`;
     await pollDuelState();
     return false;
   }
@@ -1949,24 +1947,28 @@ async function commitDuelMove(target, power, line) {
   if (!target) return;
   if (await sendDuelAction({ type: 'move', target, power, line })) {
     clearDuelSeries();
+    renderDuelTurnPanel();
   }
 }
 
 async function commitDuelPush(power, line) {
   if (await sendDuelAction({ type: 'push', power, line })) {
     clearDuelSeries();
+    renderDuelTurnPanel();
   }
 }
 
 async function commitDuelSwap(power, line) {
   if (await sendDuelAction({ type: 'swap', power, line })) {
     clearDuelSeries();
+    renderDuelTurnPanel();
   }
 }
 
 async function commitDuelGuard(power, line) {
   if (await sendDuelAction({ type: 'guard', power, line })) {
     clearDuelSeries();
+    renderDuelTurnPanel();
   }
 }
 
