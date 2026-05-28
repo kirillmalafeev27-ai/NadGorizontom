@@ -1,0 +1,16 @@
+{
+  "name": "nadgorizontom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Glass bridge quiz game for Render Web Service deployment.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "openai": "^4.77.0",
+    "three": "0.160.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

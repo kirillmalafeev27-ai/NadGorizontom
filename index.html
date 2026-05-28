@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glass Bridge - Nad Gorizontom</title>
+<link rel="stylesheet" href="styles.css?v=duel-network-mvp4" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+<script>
+window.__gameBooted = false;
+window.__loadingWatchdog = window.setTimeout(function () {
+  var text = document.querySelector('.loading-text');
+  if (text) text.textContent = 'Город медлит. Включаем резервные огни...';
+}, 7000);
+window.__bootWatchdog = window.setTimeout(function () {
+  if (window.__gameBooted) return;
+  var loading = document.getElementById('loading');
+  if (loading) {
+    var text = loading.querySelector('.loading-text');
+    if (text) text.textContent = 'Сцена не отвечает. Обнови страницу.';
+  }
+}, 18000);
+window.addEventListener('error', function (event) {
+  if (window.__gameBooted) return;
+  var text = document.querySelector('.loading-text');
+  if (text) text.textContent = 'Ошибка загрузки: ' + (event.message || 'неизвестно') + '. Обнови страницу.';
+});
+</script>
+</head>
+<body>
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Загружаем ночной мегаполис...</div>
+  <div class="loading-progress"><div id="loading-bar"></div></div>
+  <a class="loading-debug" href="/debug.html">диагностика</a>
+</div>
+
+<canvas id="scene"></canvas>
+<div id="crosshair"></div>
+<div id="danger-warning">Непрочное стекло</div>
+<div id="move-controls" class="hidden" aria-label="Движение по тайлам">
+  <button class="move-btn move-up" type="button" data-move="forward" aria-label="Вперёд">&#8593;</button>
+  <button class="move-btn move-left" type="button" data-move="left" aria-label="Влево">&#8592;</button>
+  <button class="move-btn move-right" type="button" data-move="right" aria-label="Вправо">&#8594;</button>
+  <button class="move-btn move-down" type="button" data-move="back" aria-label="Назад">&#8595;</button>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="hud-top">
+    <div id="progress">
+      <span class="label">Шаг</span>
+      <span id="step-number">0</span>
+      <span class="sep">/</span>
+      <span id="step-total">7</span>
+    </div>
+    <div id="streak">
+      <span class="label">Высота</span>
+      <span id="altitude">— м</span>
+    </div>
+    <div id="score">
+      <span class="label">Ответы</span>
+      <span id="question-score">0/0</span>
+    </div>
+    <button id="diary-btn" type="button">Дневник</button>
+    <button id="pause-btn" type="button">Пауза</button>
+  </div>
+
+  <div id="quiz" class="hidden">
+    <div id="timer-bar"><div id="timer-fill"></div></div>
+    <div id="timer-label">7.0</div>
+    <div id="question"></div>
+    <div id="options"></div>
+    <div id="hint">Стекло слышит каждый ответ — и помнит каждую ошибку</div>
+  </div>
+</div>
+
+<div id="duel-hud" class="hidden">
+  <div class="duel-topbar">
+    <div>
+      <span class="label">Sprachduell</span>
+      <span id="duel-room-label">—</span>
+    </div>
+    <div id="duel-lives">—</div>
+    <div id="duel-turn-label">—</div>
+  </div>
+
+  <div id="duel-panel" class="duel-panel">
+    <div id="duel-status">Выбери линию риска, когда будет твой ход.</div>
+    <div id="duel-risk-lines" class="duel-risk-lines">
+      <button type="button" data-duel-line="lexicon">Лексика</button>
+      <button type="button" data-duel-line="grammar">Грамматика</button>
+      <button type="button" data-duel-line="translation">Перевод</button>
+    </div>
+    <div id="duel-series" class="duel-series hidden">
+      <div id="duel-series-meta"></div>
+      <div id="duel-question"></div>
+      <div id="duel-options"></div>
+    </div>
+    <div id="duel-claim" class="duel-actions hidden">
+      <button id="duel-claim-btn" type="button">Забрать силу</button>
+      <button id="duel-risk-btn" type="button">Рискнуть дальше</button>
+    </div>
+    <div id="duel-action-panel" class="duel-actions hidden"></div>
+  </div>
+</div>
+
+<div id="gameover" class="hidden">
+  <div class="card">
+    <h1 id="endtitle">Ты упал</h1>
+    <p id="endtext">Стекло не выдержало. Город принял тебя.</p>
+    <button id="restart">Попробовать снова</button>
+  </div>
+</div>
+
+<div id="pause-menu" class="hidden">
+  <div class="card pause-card">
+    <h1>Пауза</h1>
+    <p>Город ждёт под стеклом. Можно отдышаться или вернуться к настройкам перед новым проходом.</p>
+    <button id="resume-btn" type="button">Продолжить</button>
+    <button id="settings-btn" class="secondary-card-btn" type="button">К настройкам</button>
+  </div>
+</div>
+
+<div id="diary" class="hidden">
+  <div class="card diary-card">
+    <h1>Дневник вопросов</h1>
+    <div id="diary-list"></div>
+    <button id="diary-close" type="button">Закрыть</button>
+  </div>
+</div>
+
+<div id="duel-menu" class="hidden">
+  <div class="card duel-menu-card">
+    <h1>Sprachduell</h1>
+    <p>Один игрок создаёт комнату, второй открывает эту же ссылку и входит по коду. Комнату держит общий сервер Render.</p>
+    <div class="field">
+      <label for="duel-player-name">Имя игрока</label>
+      <input id="duel-player-name" maxlength="20" placeholder="Spieler" autocomplete="off" />
+    </div>
+    <div class="duel-menu-grid">
+      <button id="duel-create-btn" type="button">Создать комнату</button>
+      <div class="field">
+        <label for="duel-room-input">Код комнаты</label>
+        <input id="duel-room-input" maxlength="8" placeholder="ABCDE" autocomplete="off" />
+      </div>
+      <button id="duel-join-btn" type="button">Подключиться</button>
+    </div>
+    <div id="duel-menu-status" class="duel-menu-status">Перед стартом выбери уровень, лексику и хотя бы одну грамматику в обычных настройках.</div>
+    <div class="duel-link-row">
+      <input id="duel-link-output" readonly />
+    </div>
+    <button id="duel-menu-close" class="secondary-card-btn" type="button">Назад</button>
+  </div>
+</div>
+
+<div id="intro" class="hidden">
+  <div class="dashboard-shell">
+    <div class="menu-kicker">Nad Gorizontom / Lernlauf</div>
+    <h1 class="title">Над горизонтом</h1>
+    <p class="subtitle">
+      Настрой забег как в Flammen: имя, уровень немецкого, лексику и грамматическую тему для каждой колонки поля.
+    </p>
+
+    <div class="setup-progress">
+      <div class="progress-step active" data-progress-step="1">1. Имя</div>
+      <div class="progress-step" data-progress-step="2">2. Уровень</div>
+      <div class="progress-step" data-progress-step="3">3. Лексика</div>
+      <div class="progress-step" data-progress-step="4">4. Колонки</div>
+    </div>
+
+    <div id="setup-step1" class="setup-step">
+      <h2 class="step-title">Кто выходит на мост</h2>
+      <p class="step-hint">Имя хранится локально и нужно только для этого забега.</p>
+      <div class="field">
+        <label for="player-name">Игрок</label>
+        <input id="player-name" maxlength="20" placeholder="Spieler" autocomplete="off" />
+      </div>
+      <div class="menu-actions">
+        <button id="to-step2-btn" class="btn-primary" type="button">Дальше</button>
+        <button id="duel-open-btn" class="btn-secondary" type="button">Sprachduell</button>
+        <span id="start-status">Сцена загружается...</span>
+      </div>
+    </div>
+
+    <div id="setup-step2" class="setup-step hidden">
+      <h2 class="step-title">Уровень и сложность</h2>
+      <p class="step-hint">Уровень держит вопросы в пределах твоего немецкого и не пускает мост слишком далеко вперёд.</p>
+      <div id="level-buttons" class="level-buttons"></div>
+      <div id="difficulty-buttons" class="difficulty-buttons"></div>
+      <div class="menu-actions">
+        <button id="back-to-step1" class="btn-secondary" type="button">Назад</button>
+      </div>
+    </div>
+
+    <div id="setup-step3" class="setup-step hidden">
+      <h2 class="step-title">Лексика забега</h2>
+      <p class="step-hint">Вопросы будут держаться выбранной тематической области.</p>
+      <div id="lexical-grid" class="lexical-grid"></div>
+      <div class="menu-actions">
+        <button id="back-to-step2" class="btn-secondary" type="button">Назад</button>
+      </div>
+    </div>
+
+    <div id="setup-step4" class="setup-step hidden">
+      <h2 class="step-title">Грамматика по колонкам</h2>
+      <p class="step-hint">Выбери тему и нажми на одну из семи колонок поля. Каждая линия должна знать свой вопрос перед стартом.</p>
+      <div id="ritual-slots" class="ritual-slots"></div>
+      <div id="grammar-picker" class="grammar-picker"></div>
+      <div class="menu-actions">
+        <button id="start-btn" type="button" disabled>Начать путь</button>
+        <button id="back-to-step3" class="btn-secondary" type="button">Назад</button>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h1>Über den Wolken</h1>
+    <p>
+      Перед тобой стеклянный мост над ночным городом. Безопасный путь есть,
+      но его не видно: он петляет по тайлам и никогда не идёт прямой линией.
+    </p>
+    <p class="rules">
+      После каждого шага ответь на вопрос, затем выбирай следующий тайл
+      стрелками на клавиатуре или кнопками на экране. Таймер стекла не виден.
+    </p>
+    <button id="legacy-start-btn">Начать путь</button>
+  </div>
+</div>
+
+<script type="module" src="main.js?v=duel-network-mvp4"></script>
+</body>
+</html>
