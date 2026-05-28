@@ -245,6 +245,10 @@ canvas#scene {
   bottom: 5vh;
   transform: translateX(-50%);
   width: min(780px, 94vw);
+  max-height: calc(100dvh - 106px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 16px;
   border: 1px solid rgba(150, 180, 220, 0.16);
   border-radius: 8px;
@@ -916,22 +920,56 @@ canvas#scene {
     min-height: 52px;
   }
   .duel-topbar {
+    top: max(8px, env(safe-area-inset-top));
     width: calc(100vw - 18px);
     flex-direction: column;
     gap: 5px;
     padding: 8px 10px;
+    font-size: 10px;
+    line-height: 1.25;
   }
   .duel-panel {
     bottom: max(12px, env(safe-area-inset-bottom));
     width: calc(100vw - 18px);
+    max-height: calc(100dvh - 118px - max(12px, env(safe-area-inset-bottom)));
+    padding: 12px;
+  }
+  #duel-status {
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+  #duel-series-meta {
+    font-size: 10px;
+  }
+  #duel-question {
+    font-size: 15px;
   }
   .duel-risk-lines,
   .duel-actions,
   #duel-options {
     grid-template-columns: 1fr;
   }
+  .duel-risk-lines button,
+  .duel-actions button,
+  #duel-options button {
+    min-height: 42px;
+  }
   .card button.secondary-card-btn {
     margin-left: 0;
+  }
+}
+
+@media (max-height: 520px) and (pointer: coarse) {
+  .duel-topbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 6px 8px;
+  }
+  .duel-panel {
+    max-height: calc(100dvh - 86px - max(8px, env(safe-area-inset-bottom)));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 10px;
   }
 }
 
