@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const { Readable } = require('node:stream');
 const zlib = require('node:zlib');
 const { handleGenerateQuestions } = require('./question-api');
 
@@ -9,7 +10,48 @@ const ROOT = __dirname;
 const THREE_ROOT = path.join(ROOT, 'node_modules', 'three');
 const DUEL_BOARD_SIZE = 7;
 const DUEL_ROOM_TTL_MS = 1000 * 60 * 60 * 4;
+const DUEL_HOST_TIMEOUT_MS = 18000;
 const duelRooms = new Map();
+const DUEL_QUESTION_BATCH_SIZE = 12;
+
+const DUEL_FALLBACK_QUESTIONS = [
+  {
+    text: 'Выбери правильную форму.',
+    display: 'Heute ___ wir durch die Stadt.',
+    options: ['gehen', 'geht', 'gehst', 'gehe'],
+    correct: 0,
+  },
+  {
+    text: 'Выбери правильный артикль.',
+    display: '___ Brücke ist aus Glas.',
+    options: ['Die', 'Der', 'Das', 'Den'],
+    correct: 0,
+  },
+  {
+    text: 'Выбери правильную форму Perfekt.',
+    display: 'Gestern ___ ich lange gelernt.',
+    options: ['habe', 'bin', 'hat', 'ist'],
+    correct: 0,
+  },
+  {
+    text: 'Выбери правильный порядок слов.',
+    display: 'Ich bleibe ruhig, weil ...',
+    options: ['ich die Antwort kenne.', 'ich kenne die Antwort.', 'kenne ich die Antwort.', 'die Antwort ich kenne.'],
+    correct: 0,
+  },
+  {
+    text: 'Выбери правильный падеж.',
+    display: 'Ich helfe ___ Spieler.',
+    options: ['dem', 'den', 'der', 'das'],
+    correct: 0,
+  },
+  {
+    text: 'Выбери правильное окончание.',
+    display: 'Das ist ein schnell___ Zug.',
+    options: ['er', 'e', 'en', 'es'],
+    correct: 0,
+  },
+];
 
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -153,6 +195,10 @@ function publicDuelState(room) {
     settings: room.settings,
     lastEvent: room.lastEvent,
     players: room.players,
+    questions: {
+      status: room.questionStatus || 'idle',
+      deckSize: room.questionDeck?.length || 0,
+    },
   };
 }
 
@@ -170,6 +216,7 @@ function cleanupDuelRooms() {
 }
 
 function makeDuelPlayer(id, name, pos) {
+  const now = Date.now();
   return {
     id,
     name: String(name || (id === 'p1' ? 'Spieler 1' : 'Spieler 2')).slice(0, 24),
@@ -177,8 +224,36 @@ function makeDuelPlayer(id, name, pos) {
     pos,
     shaky: false,
     guarded: false,
-    connectedAt: Date.now(),
+    connectedAt: now,
+    lastSeenAt: now,
   };
+}
+
+function touchDuelPlayer(room, playerId) {
+  const player = room?.players?.[playerId];
+  if (!player) return false;
+  player.lastSeenAt = Date.now();
+  touchDuelRoom(room);
+  return true;
+}
+
+function abandonDuelRoom(room) {
+  if (!room || room.phase === 'finished' || room.phase === 'abandoned') return;
+  room.phase = 'abandoned';
+  room.winner = null;
+  room.lastEvent = 'Хост покинул комнату. Дуэль остановлена.';
+  markDuelChanged(room);
+}
+
+function checkDuelHostAlive(room) {
+  if (!room || room.phase === 'finished' || room.phase === 'abandoned') return false;
+  const host = room.players.p1;
+  const lastSeen = host?.lastSeenAt || host?.connectedAt || 0;
+  if (!host || Date.now() - lastSeen > DUEL_HOST_TIMEOUT_MS) {
+    abandonDuelRoom(room);
+    return false;
+  }
+  return true;
 }
 
 function createDuelRoom(settings = {}, hostName = '') {
@@ -202,6 +277,11 @@ function createDuelRoom(settings = {}, hostName = '') {
       p1: makeDuelPlayer('p1', hostName || settings.hostName || 'Spieler 1', positions.p1),
       p2: null,
     },
+    questionDeck: [],
+    questionCursor: { p1: 0, p2: 0 },
+    questionFetch: null,
+    questionStatus: 'idle',
+    fallbackCursor: 0,
     lastEvent: 'Комната создана. Второй игрок может подключаться.',
   };
   duelRooms.set(id, room);
@@ -233,6 +313,128 @@ function otherDuelPlayerId(playerId) {
 
 function duelDistance(a, b) {
   return Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
+}
+
+function cloneDuelQuestion(question, index) {
+  return {
+    text: question.text,
+    display: question.display,
+    options: Array.isArray(question.options) ? question.options.slice() : [],
+    correct: question.correct,
+    duelIndex: index,
+  };
+}
+
+function isValidDuelQuestion(question) {
+  return Boolean(
+    question &&
+    typeof question.text === 'string' &&
+    typeof question.display === 'string' &&
+    Array.isArray(question.options) &&
+    question.options.length === 4 &&
+    Number.isInteger(question.correct) &&
+    question.correct >= 0 &&
+    question.correct <= 3
+  );
+}
+
+async function callGeneratedQuestionApi(body) {
+  return new Promise((resolve, reject) => {
+    const req = Readable.from([Buffer.from(JSON.stringify(body))]);
+    req.method = 'POST';
+    req.headers = {};
+
+    const res = {
+      statusCode: 200,
+      writeHead(status) {
+        this.statusCode = status;
+      },
+      end(payload) {
+        try {
+          const data = payload ? JSON.parse(String(payload)) : {};
+          if (this.statusCode >= 200 && this.statusCode < 300) {
+            resolve(data.questions || []);
+          } else {
+            reject(new Error(data.error || `question api ${this.statusCode}`));
+          }
+        } catch (error) {
+          reject(error);
+        }
+      },
+    };
+
+    handleGenerateQuestions(req, res).catch(reject);
+  });
+}
+
+function nextDuelFallbackQuestions(room, count) {
+  const questions = [];
+  for (let i = 0; i < count; i++) {
+    const source = DUEL_FALLBACK_QUESTIONS[room.fallbackCursor % DUEL_FALLBACK_QUESTIONS.length];
+    room.fallbackCursor += 1;
+    questions.push({
+      text: source.text,
+      display: source.display,
+      options: source.options.slice(),
+      correct: source.correct,
+    });
+  }
+  return questions;
+}
+
+async function fillDuelQuestionDeck(room) {
+  if (room.questionFetch) return room.questionFetch;
+
+  room.questionStatus = 'generating';
+  markDuelChanged(room);
+
+  room.questionFetch = (async () => {
+    const exclude = room.questionDeck.map((question) => question.display).slice(-12);
+    let questions = [];
+    try {
+      questions = await callGeneratedQuestionApi({
+        level: room.settings.level,
+        lexicalTopic: room.settings.lexicalTopic,
+        grammarTopic: room.settings.grammarTopic,
+        isWortstellung: String(room.settings.grammarTopic || '').includes('Wortstellung'),
+        count: DUEL_QUESTION_BATCH_SIZE,
+        exclude,
+      });
+    } catch (error) {
+      console.warn('Duel shared AI question generation fallback:', error.message);
+    }
+
+    const valid = questions.filter(isValidDuelQuestion);
+    room.questionDeck.push(...(valid.length ? valid : nextDuelFallbackQuestions(room, DUEL_QUESTION_BATCH_SIZE)));
+    room.questionStatus = 'ready';
+    room.questionFetch = null;
+    markDuelChanged(room);
+  })().catch((error) => {
+    room.questionDeck.push(...nextDuelFallbackQuestions(room, DUEL_QUESTION_BATCH_SIZE));
+    room.questionStatus = 'ready';
+    room.questionFetch = null;
+    markDuelChanged(room);
+    console.warn('Duel question deck failed; using fallback:', error.message);
+  });
+
+  return room.questionFetch;
+}
+
+async function nextDuelQuestion(room, playerId) {
+  if (!room.players[playerId]) return { ok: false, error: 'unknown player' };
+  if (room.phase !== 'playing') return { ok: false, error: 'room is not playing' };
+
+  const cursor = room.questionCursor[playerId] || 0;
+  if (room.questionDeck.length <= cursor) {
+    await fillDuelQuestionDeck(room);
+  }
+
+  const question = room.questionDeck[cursor];
+  if (!question) return { ok: false, error: 'question deck is empty' };
+
+  room.questionCursor[playerId] = cursor + 1;
+  touchDuelRoom(room);
+  return { ok: true, question: cloneDuelQuestion(question, cursor), state: publicDuelState(room) };
 }
 
 function resetDuelRound(room) {
@@ -421,6 +623,8 @@ async function handleDuelApi(req, res) {
       sendJson(res, 404, { error: 'room not found' });
       return;
     }
+    touchDuelPlayer(room, url.searchParams.get('playerId'));
+    checkDuelHostAlive(room);
     touchDuelRoom(room);
     sendJson(res, 200, { state: publicDuelState(room) });
     return;
@@ -451,6 +655,11 @@ async function handleDuelApi(req, res) {
       sendJson(res, 404, { error: 'room not found' });
       return;
     }
+    checkDuelHostAlive(room);
+    if (room.phase === 'abandoned') {
+      sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
+      return;
+    }
     if (room.players.p2) {
       sendJson(res, 409, { error: 'room is full' });
       return;
@@ -471,7 +680,30 @@ async function handleDuelApi(req, res) {
       sendJson(res, 404, { error: 'room not found' });
       return;
     }
+    touchDuelPlayer(room, body.playerId);
+    checkDuelHostAlive(room);
+    if (room.phase === 'abandoned') {
+      sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
+      return;
+    }
     const result = applyDuelAction(room, body.playerId, body.action || {});
+    sendJson(res, result.ok ? 200 : 400, result.ok ? result : { error: result.error, state: publicDuelState(room) });
+    return;
+  }
+
+  if (url.pathname === '/api/duel/question') {
+    const room = getDuelRoom(body.roomId);
+    if (!room) {
+      sendJson(res, 404, { error: 'room not found' });
+      return;
+    }
+    touchDuelPlayer(room, body.playerId);
+    checkDuelHostAlive(room);
+    if (room.phase === 'abandoned') {
+      sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
+      return;
+    }
+    const result = await nextDuelQuestion(room, body.playerId);
     sendJson(res, result.ok ? 200 : 400, result.ok ? result : { error: result.error, state: publicDuelState(room) });
     return;
   }

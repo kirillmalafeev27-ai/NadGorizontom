@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Glass Bridge - Nad Gorizontom</title>
-<link rel="stylesheet" href="styles.css?v=duel-network-freeflow2" />
+<link rel="stylesheet" href="styles.css?v=duel-network-fp1" />
 <script type="importmap">
 {
   "imports": {
@@ -148,7 +148,7 @@ window.addEventListener('error', function (event) {
       <button id="duel-create-btn" type="button">Создать комнату</button>
       <div class="field">
         <label for="duel-room-input">Код комнаты</label>
-        <input id="duel-room-input" maxlength="8" placeholder="ABCDE" autocomplete="off" />
+        <input id="duel-room-input" maxlength="8" placeholder="ABCDE" autocomplete="off" autocapitalize="characters" spellcheck="false" />
       </div>
       <button id="duel-join-btn" type="button">Подключиться</button>
     </div>
@@ -233,6 +233,6 @@ window.addEventListener('error', function (event) {
   </div>
 </div>
 
-<script type="module" src="main.js?v=duel-network-freeflow1"></script>
+<script type="module" src="main.js?v=duel-network-fp3"></script>
 </body>
 </html>

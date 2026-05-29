@@ -1498,10 +1498,10 @@ const DUEL_LINES = {
 };
 
 const DUEL_DIRS = [
-  { label: '↑', row: -1, col: 0 },
-  { label: '↓', row: 1, col: 0 },
-  { label: '←', row: 0, col: -1 },
-  { label: '→', row: 0, col: 1 },
+  { label: 'Вперёд', row: -1, col: 0 },
+  { label: 'Назад', row: 1, col: 0 },
+  { label: 'Влево', row: 0, col: -1 },
+  { label: 'Вправо', row: 0, col: 1 },
 ];
 
 function getDuelSettings() {
@@ -1570,7 +1570,11 @@ function startDuelPolling() {
 async function pollDuelState() {
   if (!STATE.duel.roomId) return;
   try {
-    const data = await duelApi(`/api/duel/state?roomId=${encodeURIComponent(STATE.duel.roomId)}`, null, 'GET');
+    const data = await duelApi(
+      `/api/duel/state?roomId=${encodeURIComponent(STATE.duel.roomId)}&playerId=${encodeURIComponent(STATE.duel.playerId || '')}`,
+      null,
+      'GET',
+    );
     applyDuelState(data.state);
   } catch (error) {
     if (duelStatus) duelStatus.textContent = `Связь с комнатой потеряна: ${error.message}`;
@@ -1592,7 +1596,7 @@ async function createDuelRoom() {
 }
 
 async function joinDuelRoom(roomId = duelRoomInput?.value.trim()) {
-  const cleanRoomId = String(roomId || '').trim().toUpperCase();
+  const cleanRoomId = String(roomId || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!cleanRoomId) {
     setDuelMenuStatus('Введи код комнаты.');
     return;
@@ -1626,6 +1630,7 @@ function enterDuelMode(roomId, playerId, state) {
   const settings = state?.settings || getDuelSettings();
   configureDuelQuestionBank(settings);
   rebuildRun();
+  resetDuelViewForPlayer(playerId);
   ensureDuelMannequins();
 
   intro.classList.add('hidden');
@@ -1669,6 +1674,8 @@ function applyDuelState(state) {
   if (duelTurnLabel) {
     duelTurnLabel.textContent = state.phase === 'finished'
       ? `победил ${state.players?.[state.winner]?.name || state.winner}`
+      : state.phase === 'abandoned'
+        ? 'комната закрыта'
       : state.phase === 'playing'
         ? 'оба на ходу'
         : 'ожидание';
@@ -1688,6 +1695,17 @@ function canPlayDuelNow() {
   );
 }
 
+function duelYawForPlayer(playerId) {
+  return playerId === 'p1'
+    ? Math.atan2(STATE.forwardDir.x, STATE.forwardDir.z)
+    : Math.atan2(-STATE.forwardDir.x, -STATE.forwardDir.z);
+}
+
+function resetDuelViewForPlayer(playerId) {
+  STATE.player.yaw = duelYawForPlayer(playerId);
+  STATE.player.pitch = -0.04;
+}
+
 function renderDuelTurnPanel() {
   const state = STATE.duel.state;
   if (!state) return;
@@ -1696,6 +1714,7 @@ function renderDuelTurnPanel() {
     duelSeriesEl?.classList.add('hidden');
     duelClaimEl?.classList.add('hidden');
     duelActionPanel?.classList.add('hidden');
+    setDuelRiskButtonsDisabled(true);
     if (duelStatus) duelStatus.textContent = `${state.lastEvent || 'Ждём второго игрока.'}`;
     duelRiskLines?.classList.add('hidden');
     return;
@@ -1705,17 +1724,35 @@ function renderDuelTurnPanel() {
     duelSeriesEl?.classList.add('hidden');
     duelClaimEl?.classList.add('hidden');
     duelActionPanel?.classList.add('hidden');
+    setDuelRiskButtonsDisabled(true);
     const winnerName = state.players?.[state.winner]?.name || 'победитель';
     if (duelStatus) duelStatus.textContent = `${winnerName} выиграл Sprachduell.`;
     duelRiskLines?.classList.add('hidden');
     return;
   }
 
-  if (STATE.duel.currentQuestion || STATE.duel.actionPower > 0 || STATE.duel.seriesCorrect > 0) return;
+  if (state.phase === 'abandoned') {
+    duelSeriesEl?.classList.add('hidden');
+    duelClaimEl?.classList.add('hidden');
+    duelActionPanel?.classList.add('hidden');
+    setDuelRiskButtonsDisabled(true);
+    if (duelStatus) duelStatus.textContent = state.lastEvent || 'Хост покинул комнату. Дуэль остановлена.';
+    duelRiskLines?.classList.add('hidden');
+    return;
+  }
+
+  if (
+    STATE.duel.currentQuestion ||
+    STATE.duel.questionLocked ||
+    STATE.duel.actionPower > 0 ||
+    STATE.duel.seriesCorrect > 0 ||
+    STATE.duel.seriesLine
+  ) return;
 
   duelSeriesEl?.classList.add('hidden');
   duelClaimEl?.classList.add('hidden');
   duelActionPanel?.classList.add('hidden');
+  setDuelRiskButtonsDisabled(false);
   if (duelStatus) duelStatus.textContent = `${state.lastEvent || ''} Выбери линию риска и дави темп.`;
   duelRiskLines?.classList.remove('hidden');
 }
@@ -1728,11 +1765,26 @@ function duelQuestionSlot() {
   };
 }
 
+function setDuelRiskButtonsDisabled(disabled) {
+  duelRiskLines?.querySelectorAll('button').forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
 async function startDuelSeries(line) {
   if (!canPlayDuelNow()) return;
+  if (
+    STATE.duel.questionLocked ||
+    STATE.duel.currentQuestion ||
+    STATE.duel.seriesLine ||
+    STATE.duel.actionPower > 0
+  ) return;
+
   STATE.duel.seriesLine = line;
   STATE.duel.seriesStep = 1;
   STATE.duel.seriesCorrect = 0;
+  STATE.duel.questionLocked = true;
+  setDuelRiskButtonsDisabled(true);
   duelRiskLines?.classList.add('hidden');
   await askDuelQuestion();
 }
@@ -1741,6 +1793,7 @@ async function askDuelQuestion() {
   const line = DUEL_LINES[STATE.duel.seriesLine] || DUEL_LINES.grammar;
   STATE.duel.currentQuestion = null;
   STATE.duel.questionLocked = true;
+  setDuelRiskButtonsDisabled(true);
   duelClaimEl?.classList.add('hidden');
   duelActionPanel?.classList.add('hidden');
   duelSeriesEl?.classList.remove('hidden');
@@ -1748,14 +1801,28 @@ async function askDuelQuestion() {
     duelSeriesMeta.textContent =
       `${line.title} · вопрос ${STATE.duel.seriesStep}/3 · собрано ${STATE.duel.seriesCorrect}`;
   }
-  if (duelQuestionEl) duelQuestionEl.textContent = 'Город достаёт вопрос из уже выбранной темы...';
+  if (duelQuestionEl) duelQuestionEl.textContent = 'Город достаёт вопрос...';
   if (duelOptionsEl) duelOptionsEl.innerHTML = '';
 
   let rawQuestion;
   try {
-    rawQuestion = await duelQuestionBank.nextQuestion(duelQuestionSlot());
+    const data = await duelApi('/api/duel/question', {
+      roomId: STATE.duel.roomId,
+      playerId: STATE.duel.playerId,
+      line: STATE.duel.seriesLine,
+    });
+    rawQuestion = data.question;
+    if (data.state) applyDuelState(data.state);
   } catch (error) {
-    rawQuestion = pickQuestion();
+    console.warn('Shared duel question failed:', error);
+    if (duelStatus) duelStatus.textContent = `Вопрос не пришёл: ${error.message}`;
+    STATE.duel.questionLocked = false;
+    await pollDuelState();
+    if (STATE.duel.state?.phase !== 'abandoned') {
+      clearDuelSeries();
+      renderDuelTurnPanel();
+    }
+    return;
   }
   const question = normalizeBridgeQuestion(rawQuestion);
   STATE.duel.currentQuestion = question;
@@ -1816,6 +1883,7 @@ function clearDuelSeries() {
   duelSeriesEl?.classList.add('hidden');
   duelClaimEl?.classList.add('hidden');
   duelActionPanel?.classList.add('hidden');
+  setDuelRiskButtonsDisabled(false);
 }
 
 function claimDuelPower() {
@@ -1852,6 +1920,33 @@ function duelCellOccupied(cell) {
   return Object.values(players).some((player) => player && player.pos && duelManhattan(player.pos, cell) === 0);
 }
 
+function duelMoveDirsForPlayer(playerId) {
+  if (playerId !== 'p2') return DUEL_DIRS;
+  return [
+    { label: 'Вперёд', row: 1, col: 0 },
+    { label: 'Назад', row: -1, col: 0 },
+    { label: 'Влево', row: 0, col: 1 },
+    { label: 'Вправо', row: 0, col: -1 },
+  ];
+}
+
+function duelDiagonalDirsForPlayer(playerId) {
+  if (playerId !== 'p2') {
+    return [
+      { label: 'вперёд-влево', row: -1, col: -1 },
+      { label: 'вперёд-вправо', row: -1, col: 1 },
+      { label: 'назад-влево', row: 1, col: -1 },
+      { label: 'назад-вправо', row: 1, col: 1 },
+    ];
+  }
+  return [
+    { label: 'вперёд-влево', row: 1, col: 1 },
+    { label: 'вперёд-вправо', row: 1, col: -1 },
+    { label: 'назад-влево', row: -1, col: 1 },
+    { label: 'назад-вправо', row: -1, col: -1 },
+  ];
+}
+
 function appendDuelActionButton(label, handler, disabled = false) {
   if (!duelActionPanel) return;
   const button = document.createElement('button');
@@ -1880,27 +1975,21 @@ function showDuelActions(power) {
   const pushDistance = lineKey === 'grammar' && power >= 2 ? 2 : power >= 3 ? 2 : 1;
   duelActionPanel.innerHTML = '';
 
-  for (const dir of DUEL_DIRS) {
+  for (const dir of duelMoveDirsForPlayer(STATE.duel.playerId)) {
     const target = me ? {
       row: me.pos.row + dir.row * moveDistance,
       col: me.pos.col + dir.col * moveDistance,
     } : null;
     const disabled = !duelCellInside(target) || duelCellOccupied(target);
     appendDuelActionButton(
-      `${moveDistance > 1 ? 'Рывок' : 'Шаг'} ${dir.label}`,
+      `${moveDistance > 1 ? 'Рывок' : 'Шаг'}: ${dir.label}`,
       () => commitDuelMove(target, power, lineKey),
       disabled,
     );
   }
 
   if (lineKey === 'lexicon' && power >= 2) {
-    const diagonalDirs = [
-      { label: '↖', row: -1, col: -1 },
-      { label: '↗', row: -1, col: 1 },
-      { label: '↙', row: 1, col: -1 },
-      { label: '↘', row: 1, col: 1 },
-    ];
-    for (const dir of diagonalDirs) {
+    for (const dir of duelDiagonalDirsForPlayer(STATE.duel.playerId)) {
       const target = me ? { row: me.pos.row + dir.row, col: me.pos.col + dir.col } : null;
       const disabled = !duelCellInside(target) || duelCellOccupied(target);
       appendDuelActionButton(`Скользнуть ${dir.label}`, () => commitDuelMove(target, power, lineKey), disabled);
@@ -2025,7 +2114,7 @@ function syncDuelMannequins(state) {
     const player = state.players?.[id];
     const mannequin = STATE.duel.mannequins[id];
     if (!mannequin) continue;
-    mannequin.visible = Boolean(player);
+    mannequin.visible = Boolean(player) && id !== STATE.duel.playerId;
     if (!player) continue;
     const target = cellWorldPosition(player.pos.row, player.pos.col);
     mannequin.position.copy(target);
@@ -2035,14 +2124,20 @@ function syncDuelMannequins(state) {
 }
 
 function updateDuelCamera() {
-  const center = STATE.bridgeStart.clone().lerp(STATE.bridgeEnd, 0.5);
-  const height = 13.5;
-  camera.position
-    .copy(center)
-    .addScaledVector(STATE.forwardDir, -11)
-    .addScaledVector(WORLD_UP, height)
-    .addScaledVector(STATE.rightDir, 0);
-  camera.lookAt(center);
+  const me = STATE.duel.state?.players?.[STATE.duel.playerId];
+  if (!me) return;
+
+  camera.position.copy(cellWorldPosition(me.pos.row, me.pos.col));
+  camera.position.y += PLAYER_EYE;
+
+  const yaw = STATE.player.yaw;
+  const pitch = STATE.player.pitch;
+  const lookDir = new THREE.Vector3(
+    -Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch),
+  );
+  camera.lookAt(camera.position.clone().add(lookDir));
   if (altitudeEl) altitudeEl.textContent = `${Math.round(camera.position.y)} м`;
 }
 
@@ -2050,6 +2145,10 @@ duelOpenBtn?.addEventListener('click', openDuelMenu);
 duelMenuCloseBtn?.addEventListener('click', closeDuelMenu);
 duelCreateBtn?.addEventListener('click', createDuelRoom);
 duelJoinBtn?.addEventListener('click', () => joinDuelRoom());
+duelRoomInput?.addEventListener('input', () => {
+  const clean = duelRoomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  if (duelRoomInput.value !== clean) duelRoomInput.value = clean;
+});
 duelRiskLines?.querySelectorAll('[data-duel-line]').forEach((button) => {
   button.addEventListener('click', () => startDuelSeries(button.dataset.duelLine));
 });
@@ -2494,8 +2593,17 @@ function stopCameraDrag() {
   STATE.cameraPointerId = null;
 }
 
+function canUseCameraLook() {
+  return Boolean(
+    !STATE.paused &&
+    !STATE.falling &&
+    !STATE.won &&
+    (STATE.active || (STATE.mode === 'duel' && STATE.duel.active)),
+  );
+}
+
 canvas.addEventListener('pointerdown', (e) => {
-  if (!STATE.active || STATE.paused || STATE.falling || STATE.won) return;
+  if (!canUseCameraLook()) return;
   if (!e.isPrimary) return;
   e.preventDefault();
   STATE.cameraDragging = true;
@@ -2548,7 +2656,20 @@ const keyMoves = new Map([
   ['KeyD', 'right'],
 ]);
 
+function isTextEntryTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return (
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    tagName === 'select' ||
+    target.isContentEditable
+  );
+}
+
 document.addEventListener('keydown', (e) => {
+  if (isTextEntryTarget(e.target)) return;
+
   if (e.code === 'Escape') {
     e.preventDefault();
     if (STATE.diaryForced) return;
@@ -2841,6 +2962,7 @@ function prepareMoveQuestion(row, col) {
 }
 
 function requestMove(command) {
+  if (STATE.mode === 'duel') return;
   if (!STATE.active || STATE.paused || STATE.falling || STATE.won || STATE.moving) return;
   if (STATE.currentQuestion || STATE.questionLoading) return;
 
