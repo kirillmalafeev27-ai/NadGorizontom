@@ -226,6 +226,7 @@ const STATE = {
     fallView: null,
     seenActionId: 0,
     bannerTimer: null,
+    pendingCreate: false,
   },
 
   aviationLights: [],
@@ -1488,6 +1489,11 @@ const dashboard = {
       return;
     }
 
+    if (STATE.duel.pendingCreate) {
+      completeDuelRoomCreation();
+      return;
+    }
+
     STATE.questionSettings = this.getSettings();
     questionBank.configure(STATE.questionSettings);
     enterPlay({ resetRun: STATE.returningFromSettings });
@@ -1647,17 +1653,15 @@ function setDuelMenuStatus(text) {
 
 function openDuelMenu() {
   ensureDuelAudio();
+  STATE.duel.pendingCreate = false;
   const name = dashboard.playerName?.value.trim() || localStorage.getItem('flammen_player_name') || '';
   if (duelPlayerNameInput && !duelPlayerNameInput.value.trim()) duelPlayerNameInput.value = name;
   duelMenuEl?.classList.remove('hidden');
-  setDuelMenuStatus(
-    dashboard.isComplete()
-      ? 'Создай комнату со своими темами или войди по коду: в чужой комнате вопросы задаёт хост.'
-      : 'Для своей комнаты сначала собери темы в настройках. Для входа в чужую достаточно имени и кода.',
-  );
+  setDuelMenuStatus('Создание комнаты откроет настройку тем. Для входа в чужую комнату достаточно имени и кода.');
 }
 
 function closeDuelMenu() {
+  STATE.duel.pendingCreate = false;
   duelMenuEl?.classList.add('hidden');
 }
 
@@ -1702,27 +1706,46 @@ async function pollDuelState() {
   }
 }
 
-async function createDuelRoom() {
+function createDuelRoom() {
   ensureDuelAudio();
-  if (!dashboard.isComplete()) {
-    setDuelMenuStatus('Сначала собери темы в настройках: уровень, лексику и грамматику для всех колонок.');
-    return;
+  STATE.duel.pendingCreate = true;
+  const duelName = duelPlayerNameInput?.value.trim();
+  if (duelName && dashboard.playerName) {
+    dashboard.playerName.value = duelName;
+    dashboard.saveState();
   }
+
+  duelMenuEl?.classList.add('hidden');
+  intro.classList.remove('hidden');
+  dashboard.showStep(2);
+  if (dashboard.startStatus) {
+    dashboard.startStatus.textContent = 'Собери темы дуэли. На последнем шаге «Начать путь» откроет PvP-комнату.';
+  }
+}
+
+async function completeDuelRoomCreation() {
+  ensureDuelAudio();
+  if (!dashboard.isComplete()) return;
+  const setupSettings = dashboard.getSettings();
   try {
     const settings = getDuelSettings();
-    const name = duelPlayerNameInput?.value.trim() || settings.playerName || 'Spieler 1';
+    const name = setupSettings.playerName || duelPlayerNameInput?.value.trim() || 'Spieler 1';
     const data = await duelApi('/api/duel/create', { settings, name });
+    STATE.duel.pendingCreate = false;
     enterDuelMode(data.roomId, data.playerId, data.state);
     const link = `${location.origin}${location.pathname}?duel=${data.roomId}`;
     if (duelLinkOutput) duelLinkOutput.value = link;
     setDuelMenuStatus(`Комната ${data.roomId} создана. Отправь второму игроку ссылку ниже или сам код комнаты.`);
   } catch (error) {
-    setDuelMenuStatus(`Не удалось создать комнату: ${error.message}`);
+    if (dashboard.startStatus) {
+      dashboard.startStatus.textContent = `Не удалось создать комнату: ${error.message}`;
+    }
   }
 }
 
 async function joinDuelRoom(roomId = duelRoomInput?.value.trim()) {
   ensureDuelAudio();
+  STATE.duel.pendingCreate = false;
   const cleanRoomId = String(roomId || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!cleanRoomId) {
     setDuelMenuStatus('Введи код комнаты.');
@@ -1753,6 +1776,7 @@ function enterDuelMode(roomId, playerId, state) {
   STATE.duel.currentQuestion = null;
   STATE.duel.questionLocked = false;
   STATE.duel.actionPower = 0;
+  STATE.duel.pendingCreate = false;
   STATE.duel.visualLocks = {};
   STATE.duel.visualAnims = [];
   STATE.duel.fallView = null;
