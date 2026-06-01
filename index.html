@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Glass Bridge - Nad Gorizontom</title>
 <link rel="stylesheet" href="styles.css?v=duel-network-fp1" />
+<!--
+  Import maps are unsupported in older browsers (e.g. Firefox < 108, Safari < 16.4).
+  es-module-shims polyfills them so the bare "three" specifier resolves there too.
+  On modern browsers it detects native support and does nothing.
+-->
+<script>window.esmsInitOptions = { shimMode: false, polyfillEnable: ['css-modules', 'json-modules'] };</script>
+<script async src="/vendor/es-module-shims.js?v=esms-1"></script>
 <script type="importmap">
 {
   "imports": {
@@ -29,8 +36,13 @@ window.__bootWatchdog = window.setTimeout(function () {
 }, 18000);
 window.addEventListener('error', function (event) {
   if (window.__gameBooted) return;
+  var msg = (event && event.message) || '';
+  // On browsers without native import maps the engine first fails to resolve the
+  // bare "three" specifier, then es-module-shims re-runs the modules. Ignore that
+  // benign first failure so the polyfill can boot the game quietly.
+  if (/module specifier|importmap|import map|resolv/i.test(msg)) return;
   var text = document.querySelector('.loading-text');
-  if (text) text.textContent = 'Ошибка загрузки: ' + (event.message || 'неизвестно') + '. Обнови страницу.';
+  if (text) text.textContent = 'Ошибка загрузки: ' + (msg || 'неизвестно') + '. Обнови страницу.';
 });
 </script>
 </head>

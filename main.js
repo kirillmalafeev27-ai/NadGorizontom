@@ -40,27 +40,78 @@ const IS_COARSE_POINTER = window.matchMedia?.('(pointer: coarse)').matches || fa
 const IS_SMALL_VIEWPORT = Math.min(window.innerWidth, window.innerHeight) <= 820;
 const DEVICE_MEMORY_GB = navigator.deviceMemory || 8;
 const HARDWARE_CORES = navigator.hardwareConcurrency || 8;
+
+// Manual override: ?quality=low|high (persisted in localStorage). Handy for
+// forcing the light path on a weak machine, or the full path back on.
+function readQualityOverride() {
+  let value = '';
+  try {
+    const param = new URLSearchParams(window.location.search).get('quality');
+    if (param) {
+      value = param.toLowerCase();
+      window.localStorage?.setItem('ng-quality', value);
+    } else {
+      value = (window.localStorage?.getItem('ng-quality') || '').toLowerCase();
+    }
+  } catch {
+    /* storage blocked — ignore */
+  }
+  return value === 'low' || value === 'high' ? value : '';
+}
+
+// Old integrated GPUs (Intel HD/UHD/Iris) and software renderers can't keep up
+// with the PBR city, so we sniff the WebGL renderer string and drop quality.
+function detectLowEndGpu() {
+  try {
+    const probe = document.createElement('canvas');
+    const gl = probe.getContext('webgl') || probe.getContext('experimental-webgl');
+    if (!gl) return true;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '') : '';
+    const r = name.toLowerCase();
+    if (/swiftshader|llvmpipe|software|basic render|microsoft basic/.test(r)) return true;
+    // Intel HD/UHD/Iris integrated graphics (pre-Xe) — e.g. "Intel(R) HD Graphics 6000".
+    if (/intel/.test(r) && /\b(hd|uhd|iris)\b/.test(r)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+const QUALITY_OVERRIDE = readQualityOverride();
+const IS_LOW_END =
+  QUALITY_OVERRIDE === 'low' ||
+  (QUALITY_OVERRIDE !== 'high' && detectLowEndGpu());
 const IS_MOBILE_QUALITY =
-  IS_COARSE_POINTER ||
-  IS_SMALL_VIEWPORT ||
-  DEVICE_MEMORY_GB <= 4 ||
-  HARDWARE_CORES <= 4 ||
-  navigator.userAgentData?.mobile === true;
+  QUALITY_OVERRIDE === 'low' ||
+  (QUALITY_OVERRIDE !== 'high' &&
+    (IS_COARSE_POINTER ||
+      IS_SMALL_VIEWPORT ||
+      DEVICE_MEMORY_GB <= 4 ||
+      HARDWARE_CORES <= 4 ||
+      IS_LOW_END ||
+      navigator.userAgentData?.mobile === true));
 const QUALITY = {
   mobile: IS_MOBILE_QUALITY,
+  lowEnd: IS_LOW_END,
   antialias: !IS_MOBILE_QUALITY,
-  pixelRatioCap: IS_MOBILE_QUALITY ? 1.15 : 2,
-  cameraFar: IS_MOBILE_QUALITY ? 2800 : 8000,
-  fogDensity: IS_MOBILE_QUALITY ? 0.0032 : 0.0026,
-  fallbackBuildingCount: IS_MOBILE_QUALITY ? 72 : 180,
+  pixelRatioCap: IS_LOW_END ? 1 : IS_MOBILE_QUALITY ? 1.15 : 2,
+  cameraFar: IS_LOW_END ? 2200 : IS_MOBILE_QUALITY ? 2800 : 8000,
+  fogDensity: IS_LOW_END ? 0.0038 : IS_MOBILE_QUALITY ? 0.0032 : 0.0026,
+  fallbackBuildingCount: IS_LOW_END ? 48 : IS_MOBILE_QUALITY ? 72 : 180,
   loadRealCity: true,
-  maxAviationLights: IS_MOBILE_QUALITY ? 4 : 16,
+  maxAviationLights: IS_LOW_END ? 2 : IS_MOBILE_QUALITY ? 4 : 16,
   platformPointLights: !IS_MOBILE_QUALITY,
   tilePointLights: !IS_MOBILE_QUALITY,
   tileTextureSize: IS_MOBILE_QUALITY ? 256 : 512,
   crackRays: IS_MOBILE_QUALITY ? 4 : 7,
-  frameIntervalMs: IS_MOBILE_QUALITY ? 1000 / 45 : 0,
+  frameIntervalMs: IS_LOW_END ? 1000 / 30 : IS_MOBILE_QUALITY ? 1000 / 45 : 0,
 };
+
+console.info(
+  `Render quality: ${IS_LOW_END ? 'low-end' : IS_MOBILE_QUALITY ? 'mobile' : 'high'}` +
+    (QUALITY_OVERRIDE ? ` (forced: ${QUALITY_OVERRIDE})` : ''),
+);
 
 function getRenderPixelRatio() {
   return Math.min(window.devicePixelRatio || 1, QUALITY.pixelRatioCap);

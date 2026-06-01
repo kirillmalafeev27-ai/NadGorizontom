@@ -81,6 +81,8 @@
   button:disabled { opacity: 0.5; cursor: default; }
   .summary { margin-top: 8px; color: #8b949e; font-size: 12px; }
 </style>
+<script>window.esmsInitOptions = { shimMode: false, polyfillEnable: ['css-modules', 'json-modules'] };</script>
+<script async src="/vendor/es-module-shims.js?v=esms-1"></script>
 <script type="importmap">
 {
   "imports": {
@@ -207,8 +209,18 @@ async function runEnv() {
     typeof HTMLScriptElement !== 'undefined' &&
     typeof HTMLScriptElement.supports === 'function' &&
     HTMLScriptElement.supports('importmap');
-  row($env, 'Import maps', importMapOk ? 'ok' : 'warn',
-    importMapOk ? 'supported' : 'не подтверждено через HTMLScriptElement.supports');
+  const esmsActive = !!(
+    window.esmsInitOptions ||
+    window.importShim ||
+    document.querySelector('script[src*="es-module-shims"]')
+  );
+  if (importMapOk) {
+    row($env, 'Import maps', 'ok', 'нативная поддержка');
+  } else if (esmsActive) {
+    row($env, 'Import maps', 'ok', 'нет нативной — активен полифилл es-module-shims');
+  } else {
+    row($env, 'Import maps', 'warn', 'нет нативной поддержки и полифилла');
+  }
 
   row($env, 'WebAssembly', typeof WebAssembly === 'object' ? 'ok' : 'err',
     typeof WebAssembly === 'object' ? 'available' : 'нет — meshopt не сработает');
