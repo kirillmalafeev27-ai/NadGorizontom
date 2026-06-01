@@ -1509,8 +1509,8 @@ const DUEL_LINES = {
 const DUEL_DIRS = [
   { label: 'Вперёд', row: -1, col: 0 },
   { label: 'Назад', row: 1, col: 0 },
-  { label: 'Влево', row: 0, col: -1 },
-  { label: 'Вправо', row: 0, col: 1 },
+  { label: 'Влево', row: 0, col: 1 },
+  { label: 'Вправо', row: 0, col: -1 },
 ];
 
 const duelAudio = {
@@ -1650,7 +1650,11 @@ function openDuelMenu() {
   const name = dashboard.playerName?.value.trim() || localStorage.getItem('flammen_player_name') || '';
   if (duelPlayerNameInput && !duelPlayerNameInput.value.trim()) duelPlayerNameInput.value = name;
   duelMenuEl?.classList.remove('hidden');
-  setDuelMenuStatus('Создай комнату и отправь ссылку второму игроку, либо введи его код комнаты.');
+  setDuelMenuStatus(
+    dashboard.isComplete()
+      ? 'Создай комнату со своими темами или войди по коду: в чужой комнате вопросы задаёт хост.'
+      : 'Для своей комнаты сначала собери темы в настройках. Для входа в чужую достаточно имени и кода.',
+  );
 }
 
 function closeDuelMenu() {
@@ -1700,6 +1704,10 @@ async function pollDuelState() {
 
 async function createDuelRoom() {
   ensureDuelAudio();
+  if (!dashboard.isComplete()) {
+    setDuelMenuStatus('Сначала собери темы в настройках: уровень, лексику и грамматику для всех колонок.');
+    return;
+  }
   try {
     const settings = getDuelSettings();
     const name = duelPlayerNameInput?.value.trim() || settings.playerName || 'Spieler 1';
@@ -2063,25 +2071,25 @@ function duelMoveDirsForPlayer(playerId) {
   return [
     { label: 'Вперёд', row: 1, col: 0 },
     { label: 'Назад', row: -1, col: 0 },
-    { label: 'Влево', row: 0, col: 1 },
-    { label: 'Вправо', row: 0, col: -1 },
+    { label: 'Влево', row: 0, col: -1 },
+    { label: 'Вправо', row: 0, col: 1 },
   ];
 }
 
 function duelDiagonalDirsForPlayer(playerId) {
   if (playerId !== 'p2') {
     return [
-      { label: 'вперёд-влево', row: -1, col: -1 },
-      { label: 'вперёд-вправо', row: -1, col: 1 },
-      { label: 'назад-влево', row: 1, col: -1 },
-      { label: 'назад-вправо', row: 1, col: 1 },
+      { label: 'вперёд-влево', row: -1, col: 1 },
+      { label: 'вперёд-вправо', row: -1, col: -1 },
+      { label: 'назад-влево', row: 1, col: 1 },
+      { label: 'назад-вправо', row: 1, col: -1 },
     ];
   }
   return [
-    { label: 'вперёд-влево', row: 1, col: 1 },
-    { label: 'вперёд-вправо', row: 1, col: -1 },
-    { label: 'назад-влево', row: -1, col: 1 },
-    { label: 'назад-вправо', row: -1, col: -1 },
+    { label: 'вперёд-влево', row: 1, col: -1 },
+    { label: 'вперёд-вправо', row: 1, col: 1 },
+    { label: 'назад-влево', row: -1, col: -1 },
+    { label: 'назад-вправо', row: -1, col: 1 },
   ];
 }
 
