@@ -224,6 +224,7 @@ const STATE = {
     visualLocks: {},
     visualAnims: [],
     fallView: null,
+    cameraMove: null,
     seenActionId: 0,
     bannerTimer: null,
     pendingCreate: false,
@@ -1780,6 +1781,7 @@ function enterDuelMode(roomId, playerId, state) {
   STATE.duel.visualLocks = {};
   STATE.duel.visualAnims = [];
   STATE.duel.fallView = null;
+  STATE.duel.cameraMove = null;
   STATE.duel.seenActionId = 0;
 
   const settings = state?.settings || getDuelSettings();
@@ -1820,6 +1822,7 @@ function leaveDuelMode() {
   STATE.duel.visualLocks = {};
   STATE.duel.visualAnims = [];
   STATE.duel.fallView = null;
+  STATE.duel.cameraMove = null;
 }
 
 function applyDuelState(state) {
@@ -1837,8 +1840,6 @@ function applyDuelState(state) {
   if (duelTurnLabel) {
     duelTurnLabel.textContent = state.phase === 'finished'
       ? `победил ${state.players?.[state.winner]?.name || state.winner}`
-      : state.phase === 'abandoned'
-        ? 'комната закрыта'
       : state.phase === 'playing'
         ? 'оба на ходу'
         : 'ожидание';
@@ -1891,16 +1892,6 @@ function renderDuelTurnPanel() {
     setDuelRiskButtonsDisabled(true);
     const winnerName = state.players?.[state.winner]?.name || 'победитель';
     if (duelStatus) duelStatus.textContent = `${winnerName} выиграл Sprachduell.`;
-    duelRiskLines?.classList.add('hidden');
-    return;
-  }
-
-  if (state.phase === 'abandoned') {
-    duelSeriesEl?.classList.add('hidden');
-    duelClaimEl?.classList.add('hidden');
-    duelActionPanel?.classList.add('hidden');
-    setDuelRiskButtonsDisabled(true);
-    if (duelStatus) duelStatus.textContent = state.lastEvent || 'Хост покинул комнату. Дуэль остановлена.';
     duelRiskLines?.classList.add('hidden');
     return;
   }
@@ -1984,10 +1975,8 @@ async function askDuelQuestion() {
     if (duelStatus) duelStatus.textContent = `Вопрос не пришёл: ${error.message}`;
     STATE.duel.questionLocked = false;
     await pollDuelState();
-    if (STATE.duel.state?.phase !== 'abandoned') {
-      clearDuelSeries();
-      renderDuelTurnPanel();
-    }
+    clearDuelSeries();
+    renderDuelTurnPanel();
     return;
   }
   const question = normalizeBridgeQuestion(rawQuestion);
@@ -2276,11 +2265,14 @@ function startDuelMannequinAnimation(playerId, fromCell, toCell, options = {}) {
   mannequin.visible = true;
   mannequin.position.copy(from);
   mannequin.position.y += 0.1;
+  mannequin.rotation.x = 0;
+  mannequin.rotation.z = 0;
 }
 
 function startDuelFallView(action) {
   const from = duelWorldPosition(action.from);
   const to = duelWorldPosition(action.to || action.from);
+  STATE.duel.cameraMove = null;
   STATE.duel.fallView = {
     start: performance.now(),
     duration: FALL_DURATION_MS,
@@ -2292,8 +2284,18 @@ function startDuelFallView(action) {
   };
 }
 
+function startDuelCameraMove(fromCell, toCell, options = {}) {
+  if (!fromCell || !toCell || STATE.duel.fallView) return;
+  STATE.duel.cameraMove = {
+    start: performance.now(),
+    duration: options.duration || STEP_MOVE_MS,
+    from: duelWorldPosition(fromCell),
+    to: duelWorldPosition(toCell),
+    lift: options.lift ?? 0.08,
+  };
+}
+
 function updateDuelVisuals(t, dt) {
-  if (!STATE.duel.visualAnims.length) return;
   STATE.duel.visualAnims = STATE.duel.visualAnims.filter((anim) => {
     const mannequin = STATE.duel.mannequins[anim.playerId];
     if (!mannequin) return false;
@@ -2315,9 +2317,14 @@ function updateDuelVisuals(t, dt) {
   });
 
   const now = performance.now();
+  let unlocked = false;
   for (const [playerId, until] of Object.entries(STATE.duel.visualLocks)) {
-    if (until <= now) delete STATE.duel.visualLocks[playerId];
+    if (until <= now) {
+      delete STATE.duel.visualLocks[playerId];
+      unlocked = true;
+    }
   }
+  if (unlocked && STATE.duel.state) syncDuelMannequins(STATE.duel.state);
 }
 
 function handleDuelActionEvent(action) {
@@ -2332,12 +2339,14 @@ function handleDuelActionEvent(action) {
 
   if (action.type === 'move') {
     playDuelSound('move');
+    if (action.actorId === me) startDuelCameraMove(action.from, action.to);
     startDuelMannequinAnimation(action.actorId, action.from, action.to);
     return;
   }
 
   if (action.type === 'push') {
     playDuelSound('push');
+    if (action.targetId === me) startDuelCameraMove(action.from, action.to, { duration: 560, lift: 0.12 });
     startDuelMannequinAnimation(action.targetId, action.from, action.to, { duration: 560 });
     return;
   }
@@ -2349,6 +2358,8 @@ function handleDuelActionEvent(action) {
 
   if (action.type === 'swap') {
     playDuelSound('swap');
+    if (action.actorId === me) startDuelCameraMove(action.actorFrom, action.actorTo, { duration: 620, lift: 0.14 });
+    if (action.targetId === me) startDuelCameraMove(action.targetFrom, action.targetTo, { duration: 620, lift: 0.14 });
     startDuelMannequinAnimation(action.actorId, action.actorFrom, action.actorTo, { duration: 620 });
     startDuelMannequinAnimation(action.targetId, action.targetFrom, action.targetTo, { duration: 620 });
     return;
@@ -2361,6 +2372,7 @@ function handleDuelActionEvent(action) {
 
   if (action.type === 'penaltyStep') {
     playDuelSound('move');
+    if (action.targetId === me) startDuelCameraMove(action.from, action.to, { duration: 520 });
     startDuelMannequinAnimation(action.targetId, action.from, action.to, { duration: 520 });
     return;
   }
@@ -2442,12 +2454,19 @@ function syncDuelMannequins(state) {
       mannequin.visible = true;
       continue;
     }
-    mannequin.visible = Boolean(player) && id !== STATE.duel.playerId;
-    if (!player) continue;
+    const isFinalFallen =
+      state.phase === 'finished' &&
+      state.lastAction?.type === 'fall' &&
+      state.lastAction?.final &&
+      state.lastAction?.fallenId === id;
+    mannequin.visible = Boolean(player) && id !== STATE.duel.playerId && !isFinalFallen;
+    if (!player || isFinalFallen) continue;
     const target = cellWorldPosition(player.pos.row, player.pos.col);
     mannequin.position.copy(target);
     mannequin.position.y += 0.1;
+    mannequin.rotation.x = 0;
     mannequin.rotation.y = id === 'p1' ? STATE.bridgeYaw : STATE.bridgeYaw + Math.PI;
+    mannequin.rotation.z = 0;
   }
 }
 
@@ -2478,7 +2497,16 @@ function updateDuelCamera() {
   const me = STATE.duel.state?.players?.[STATE.duel.playerId];
   if (!me) return;
 
-  camera.position.copy(cellWorldPosition(me.pos.row, me.pos.col));
+  const move = STATE.duel.cameraMove;
+  if (move) {
+    const p = THREE.MathUtils.clamp((performance.now() - move.start) / move.duration, 0, 1);
+    const eased = p * p * (3 - 2 * p);
+    camera.position.copy(move.from).lerp(move.to, eased);
+    camera.position.y += Math.sin(p * Math.PI) * move.lift;
+    if (p >= 1) STATE.duel.cameraMove = null;
+  } else {
+    camera.position.copy(cellWorldPosition(me.pos.row, me.pos.col));
+  }
   camera.position.y += PLAYER_EYE;
 
   const yaw = STATE.player.yaw;

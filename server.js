@@ -10,7 +10,6 @@ const ROOT = __dirname;
 const THREE_ROOT = path.join(ROOT, 'node_modules', 'three');
 const DUEL_BOARD_SIZE = 7;
 const DUEL_ROOM_TTL_MS = 1000 * 60 * 60 * 4;
-const DUEL_HOST_TIMEOUT_MS = 18000;
 const duelRooms = new Map();
 const DUEL_QUESTION_BATCH_SIZE = 12;
 
@@ -330,26 +329,6 @@ function touchDuelPlayer(room, playerId) {
   if (!player) return false;
   player.lastSeenAt = Date.now();
   touchDuelRoom(room);
-  return true;
-}
-
-function abandonDuelRoom(room) {
-  if (!room || room.phase === 'finished' || room.phase === 'abandoned') return;
-  room.phase = 'abandoned';
-  room.winner = null;
-  room.lastEvent = 'Хост покинул комнату. Дуэль остановлена.';
-  setDuelAction(room, { type: 'abandoned' });
-  markDuelChanged(room);
-}
-
-function checkDuelHostAlive(room) {
-  if (!room || room.phase === 'finished' || room.phase === 'abandoned') return false;
-  const host = room.players.p1;
-  const lastSeen = host?.lastSeenAt || host?.connectedAt || 0;
-  if (!host || Date.now() - lastSeen > DUEL_HOST_TIMEOUT_MS) {
-    abandonDuelRoom(room);
-    return false;
-  }
   return true;
 }
 
@@ -870,7 +849,6 @@ async function handleDuelApi(req, res) {
       return;
     }
     touchDuelPlayer(room, url.searchParams.get('playerId'));
-    checkDuelHostAlive(room);
     touchDuelRoom(room);
     sendJson(res, 200, { state: publicDuelState(room) });
     return;
@@ -901,11 +879,6 @@ async function handleDuelApi(req, res) {
       sendJson(res, 404, { error: 'room not found' });
       return;
     }
-    checkDuelHostAlive(room);
-    if (room.phase === 'abandoned') {
-      sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
-      return;
-    }
     if (room.players.p2) {
       sendJson(res, 409, { error: 'room is full' });
       return;
@@ -928,11 +901,6 @@ async function handleDuelApi(req, res) {
       return;
     }
     touchDuelPlayer(room, body.playerId);
-    checkDuelHostAlive(room);
-    if (room.phase === 'abandoned') {
-      sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
-      return;
-    }
     const result = applyDuelAction(room, body.playerId, body.action || {});
     sendJson(res, result.ok ? 200 : 400, result.ok ? result : { error: result.error, state: publicDuelState(room) });
     return;
@@ -945,11 +913,6 @@ async function handleDuelApi(req, res) {
       return;
     }
     touchDuelPlayer(room, body.playerId);
-    checkDuelHostAlive(room);
-    if (room.phase === 'abandoned') {
-      sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
-      return;
-    }
     const result = await nextDuelQuestion(room, body.playerId, body.line);
     sendJson(res, result.ok ? 200 : 400, result.ok ? result : { error: result.error, state: publicDuelState(room) });
     return;
