@@ -173,26 +173,55 @@ function parseJsonQuestions(rawText) {
   return Array.isArray(parsed) ? parsed.filter(isValidQuestion) : [];
 }
 
-function buildSyntheticPrompt({ level, lexicalTopic, grammarTopic, isWortstellung, questionsCount, exclude, topicRule }) {
-  const topicPart = topicRule ? `\nSpezifische Regel für "${grammarTopic}":\n${topicRule}\n` : '';
+function buildSyntheticPrompt({ level, lexicalTopic, grammarTopic, isWortstellung, questionsCount, exclude, topicRule, duelLine }) {
+  const line = ['lexicon', 'grammar', 'translation'].includes(duelLine) ? duelLine : 'grammar';
+  const topicPart = topicRule && line === 'grammar' ? `\nSpezifische Regel für "${grammarTopic}":\n${topicRule}\n` : '';
   const excludePart = exclude && exclude.length
-    ? `\nVerwende diese Sätze nicht erneut: ${exclude.slice(-10).map((item) => `"${item}"`).join(', ')}\n`
+    ? `\nVerwende diese Aufgaben nicht erneut: ${exclude.slice(-10).map((item) => `"${item}"`).join(', ')}\n`
     : '';
-  const taskKind = isWortstellung
-    ? 'Wortstellungsübungen. Die Aufgabe-Zeile enthält durcheinander gebrachte Wörter oder Satzteile.'
-    : 'Lückenübungen. Die Aufgabe-Zeile enthält einen deutschen Satz mit genau einer Lücke ___.';
+  const lineProfiles = {
+    lexicon: {
+      title: 'Wortschatzduell-Aufgaben',
+      focus: `Teste Wortbedeutung, Synonyme, passende Verben/Nomen und thematischen Wortschatz zum Thema "${lexicalTopic || 'frei'}". Grammatik soll sehr einfach bleiben.`,
+      taskKind: 'Wortschatzübungen. Die Aufgabe-Zeile enthält ein deutsches oder russisches Wort, eine kurze Situation oder einen Satz mit einer lexikalischen Lücke ___.',
+      correctRule: 'lexikalisch und semantisch richtig',
+      instruction: 'Wähle das Wort, das den Sinn trägt.',
+      displayLabel: 'Aufgabe',
+    },
+    translation: {
+      title: 'Übersetzungsduell-Aufgaben',
+      focus: `Teste kurze Übersetzungen Deutsch-Russisch und Russisch-Deutsch zum Thema "${lexicalTopic || 'frei'}". Die Optionen müssen ganze sinnvolle Phrasen sein.`,
+      taskKind: 'Übersetzungsübungen. Die Aufgabe-Zeile enthält eine kurze Phrase oder einen kurzen Satz, der sinngemäß übersetzt werden muss.',
+      correctRule: 'sinngemäß und sprachlich natürlich richtig',
+      instruction: 'Wähle die Übersetzung, die wirklich klingt.',
+      displayLabel: 'Aufgabe',
+    },
+    grammar: {
+      title: isWortstellung ? 'Wortstellungsübungen' : 'Grammatikübungen',
+      focus: `Teste genau dieses Grammatikthema: "${grammarTopic}". Der Wortschatz soll zum Thema "${lexicalTopic || 'frei'}" passen.`,
+      taskKind: isWortstellung
+        ? 'Wortstellungsübungen. Die Aufgabe-Zeile enthält durcheinander gebrachte Wörter oder Satzteile.'
+        : 'Lückenübungen. Die Aufgabe-Zeile enthält einen deutschen Satz mit genau einer Lücke ___.',
+      correctRule: 'grammatisch korrekt',
+      instruction: isWortstellung ? 'Ordne den Satz richtig.' : 'Wähle die richtige Form.',
+      displayLabel: isWortstellung ? 'Woerter' : 'Satz',
+    },
+  };
+  const profile = lineProfiles[line];
 
   return `Du bist ein erfahrener DaF-Lehrer und erstellst Multiple-Choice-Übungen.
 
-Erstelle genau ${questionsCount} deutsche Grammatikübungen.
+Erstelle genau ${questionsCount} deutsche ${profile.title}.
 Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz über ${level}.
-Grammatikthema: ${grammarTopic}.
+Linie im Spiel: ${line}.
+Fokus: ${profile.focus}
+Grammatikthema der Runde: ${grammarTopic}.
 Lexikalisches Thema: ${lexicalTopic || 'frei'}.
-Übungstyp: ${taskKind}
+Übungstyp: ${profile.taskKind}
 ${topicPart}${excludePart}
 Qualitätsregeln:
 1. Jede Aufgabe hat genau vier Antwortmöglichkeiten A, B, C, D.
-2. Genau eine Antwort ist grammatisch korrekt.
+2. Genau eine Antwort ist ${profile.correctRule}.
 3. Die falschen Antworten sind plausibel, aber eindeutig falsch.
 4. Die richtige Antwort muss absolut korrekt sein. Wenn du unsicher bist, formuliere die Aufgabe neu.
 5. Löse jede deiner Aufgaben selbst und schreibe die Schlüssel erst nach der Selbstprüfung.
@@ -201,15 +230,15 @@ Qualitätsregeln:
 
 Ausgabeformat, exakt so:
 AUFGABEN
-1. Anweisung: Wähle die richtige Option.
-Satz: ...
+1. Anweisung: ${profile.instruction}
+${profile.displayLabel}: ...
 A) ...
 B) ...
 C) ...
 D) ...
 
-2. Anweisung: Wähle die richtige Option.
-Satz: ...
+2. Anweisung: ${profile.instruction}
+${profile.displayLabel}: ...
 A) ...
 B) ...
 C) ...
@@ -288,7 +317,7 @@ async function handleGenerateQuestions(req, res) {
     return;
   }
 
-  const { level, lexicalTopic, grammarTopic, isWortstellung, count, exclude } = body;
+  const { level, lexicalTopic, grammarTopic, isWortstellung, count, exclude, duelLine } = body;
 
   if (!level || !grammarTopic) {
     sendJson(res, 400, { error: 'level and grammarTopic are required' });
@@ -309,7 +338,7 @@ async function handleGenerateQuestions(req, res) {
   }
 
   const questionsCount = count || 10;
-  const cacheKey = `${level}:${grammarTopic}:${lexicalTopic || ''}:${isWortstellung ? 'w' : 'g'}`;
+  const cacheKey = `${duelLine || 'grammar'}:${level}:${grammarTopic}:${lexicalTopic || ''}:${isWortstellung ? 'w' : 'g'}`;
 
   if (questionPool[cacheKey] && questionPool[cacheKey].length >= questionsCount) {
     const cached = questionPool[cacheKey].splice(0, questionsCount);
@@ -366,7 +395,8 @@ Regeln für Lückenübungen:
     isWortstellung,
     questionsCount,
     exclude,
-    topicRule
+    topicRule,
+    duelLine,
   });
 
   const errors = [];

@@ -53,6 +53,64 @@ const DUEL_FALLBACK_QUESTIONS = [
   },
 ];
 
+const DUEL_LINE_KEYS = ['lexicon', 'grammar', 'translation'];
+const DUEL_DEFAULT_LINE = 'grammar';
+const DUEL_FALLBACK_BY_LINE = {
+  grammar: DUEL_FALLBACK_QUESTIONS,
+  lexicon: [
+    {
+      text: 'Выбери слово, которое держит смысл фразы.',
+      display: 'Der Wind ist heute sehr ___.',
+      options: ['stark', 'teuer', 'rund', 'leer'],
+      correct: 0,
+    },
+    {
+      text: 'Найди немецкое слово по смыслу.',
+      display: 'край, грань',
+      options: ['der Rand', 'der Regen', 'die Reise', 'das Regal'],
+      correct: 0,
+    },
+    {
+      text: 'Выбери слово, которое подходит к теме.',
+      display: 'Auf der Bruecke braucht man ___.',
+      options: ['Mut', 'Milch', 'Miete', 'Mode'],
+      correct: 0,
+    },
+    {
+      text: 'Найди ближайшее значение.',
+      display: 'sich bewegen',
+      options: ['двигаться', 'молчать', 'забывать', 'платить'],
+      correct: 0,
+    },
+  ],
+  translation: [
+    {
+      text: 'Выбери живой перевод фразы.',
+      display: 'Ich bleibe ruhig.',
+      options: ['Я остаюсь спокойным.', 'Я бегу быстрее.', 'Я вижу город.', 'Я теряю ключ.'],
+      correct: 0,
+    },
+    {
+      text: 'Собери смысл без лишнего шума.',
+      display: 'Мы идём через мост.',
+      options: ['Wir gehen ueber die Bruecke.', 'Wir gehen in die Bruecke.', 'Wir geht ueber die Bruecke.', 'Wir gehen der Bruecke.'],
+      correct: 0,
+    },
+    {
+      text: 'Выбери перевод, который звучит по-немецки.',
+      display: 'Не смотри вниз.',
+      options: ['Sieh nicht nach unten.', 'Nicht sieh unten.', 'Siehst nicht unten.', 'Nach unten nicht sehen.'],
+      correct: 0,
+    },
+    {
+      text: 'Выбери верный смысл фразы.',
+      display: 'Der Gegner steht am Rand.',
+      options: ['Противник стоит у края.', 'Противник ждёт дома.', 'Противник пишет письмо.', 'Противник закрывает дверь.'],
+      correct: 0,
+    },
+  ],
+};
+
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.glb': 'model/gltf-binary',
@@ -177,6 +235,43 @@ function makeRoomId() {
   return duelRooms.has(id) ? makeRoomId() : id;
 }
 
+function normalizeDuelLine(line) {
+  return DUEL_LINE_KEYS.includes(line) ? line : DUEL_DEFAULT_LINE;
+}
+
+function makeLineRecord(factory) {
+  return DUEL_LINE_KEYS.reduce((record, line) => {
+    record[line] = factory(line);
+    return record;
+  }, {});
+}
+
+function makeDuelQuestionStore() {
+  return {
+    deck: makeLineRecord(() => []),
+    cursor: {
+      p1: makeLineRecord(() => 0),
+      p2: makeLineRecord(() => 0),
+    },
+    fetch: makeLineRecord(() => null),
+    status: makeLineRecord(() => 'idle'),
+    fallbackCursor: makeLineRecord(() => 0),
+  };
+}
+
+function copyDuelPos(pos) {
+  return pos ? { row: Number(pos.row), col: Number(pos.col) } : null;
+}
+
+function setDuelAction(room, action) {
+  room.eventSeq = (room.eventSeq || 0) + 1;
+  room.lastAction = {
+    id: room.eventSeq,
+    at: Date.now(),
+    ...action,
+  };
+}
+
 function duelStartPositions() {
   const center = Math.floor(DUEL_BOARD_SIZE / 2);
   return {
@@ -194,10 +289,11 @@ function publicDuelState(room) {
     winner: room.winner,
     settings: room.settings,
     lastEvent: room.lastEvent,
+    lastAction: room.lastAction || null,
     players: room.players,
     questions: {
-      status: room.questionStatus || 'idle',
-      deckSize: room.questionDeck?.length || 0,
+      status: room.questionStatus || makeLineRecord(() => 'idle'),
+      deckSize: makeLineRecord((line) => room.questionDeck?.[line]?.length || 0),
     },
   };
 }
@@ -242,6 +338,7 @@ function abandonDuelRoom(room) {
   room.phase = 'abandoned';
   room.winner = null;
   room.lastEvent = 'Хост покинул комнату. Дуэль остановлена.';
+  setDuelAction(room, { type: 'abandoned' });
   markDuelChanged(room);
 }
 
@@ -260,6 +357,7 @@ function createDuelRoom(settings = {}, hostName = '') {
   cleanupDuelRooms();
   const id = makeRoomId();
   const positions = duelStartPositions();
+  const questionStore = makeDuelQuestionStore();
   const room = {
     id,
     createdAt: Date.now(),
@@ -277,11 +375,13 @@ function createDuelRoom(settings = {}, hostName = '') {
       p1: makeDuelPlayer('p1', hostName || settings.hostName || 'Spieler 1', positions.p1),
       p2: null,
     },
-    questionDeck: [],
-    questionCursor: { p1: 0, p2: 0 },
-    questionFetch: null,
-    questionStatus: 'idle',
-    fallbackCursor: 0,
+    questionDeck: questionStore.deck,
+    questionCursor: questionStore.cursor,
+    questionFetch: questionStore.fetch,
+    questionStatus: questionStore.status,
+    fallbackCursor: questionStore.fallbackCursor,
+    eventSeq: 0,
+    lastAction: null,
     lastEvent: 'Комната создана. Второй игрок может подключаться.',
   };
   duelRooms.set(id, room);
@@ -367,11 +467,44 @@ async function callGeneratedQuestionApi(body) {
   });
 }
 
-function nextDuelFallbackQuestions(room, count) {
+function buildDuelQuestionRequest(room, line, exclude) {
+  const grammarTopic = room.settings.grammarTopic || 'Perfekt';
+  const base = {
+    level: room.settings.level,
+    lexicalTopic: room.settings.lexicalTopic,
+    grammarTopic,
+    isWortstellung: String(grammarTopic).includes('Wortstellung'),
+    count: DUEL_QUESTION_BATCH_SIZE,
+    exclude,
+    duelLine: line,
+  };
+
+  if (line === 'lexicon') {
+    return {
+      ...base,
+      grammarTopic,
+      isWortstellung: false,
+    };
+  }
+
+  if (line === 'translation') {
+    return {
+      ...base,
+      isWortstellung: false,
+    };
+  }
+
+  return base;
+}
+
+function nextDuelFallbackQuestions(room, line, count) {
+  const safeLine = normalizeDuelLine(line);
+  const fallback = DUEL_FALLBACK_BY_LINE[safeLine] || DUEL_FALLBACK_BY_LINE[DUEL_DEFAULT_LINE];
   const questions = [];
   for (let i = 0; i < count; i++) {
-    const source = DUEL_FALLBACK_QUESTIONS[room.fallbackCursor % DUEL_FALLBACK_QUESTIONS.length];
-    room.fallbackCursor += 1;
+    const cursor = room.fallbackCursor[safeLine] || 0;
+    const source = fallback[cursor % fallback.length];
+    room.fallbackCursor[safeLine] = cursor + 1;
     questions.push({
       text: source.text,
       display: source.display,
@@ -382,57 +515,53 @@ function nextDuelFallbackQuestions(room, count) {
   return questions;
 }
 
-async function fillDuelQuestionDeck(room) {
-  if (room.questionFetch) return room.questionFetch;
+async function fillDuelQuestionDeck(room, line) {
+  const safeLine = normalizeDuelLine(line);
+  if (room.questionFetch[safeLine]) return room.questionFetch[safeLine];
 
-  room.questionStatus = 'generating';
+  room.questionStatus[safeLine] = 'generating';
   markDuelChanged(room);
 
-  room.questionFetch = (async () => {
-    const exclude = room.questionDeck.map((question) => question.display).slice(-12);
+  room.questionFetch[safeLine] = (async () => {
+    const deck = room.questionDeck[safeLine];
+    const exclude = deck.map((question) => question.display).slice(-12);
     let questions = [];
     try {
-      questions = await callGeneratedQuestionApi({
-        level: room.settings.level,
-        lexicalTopic: room.settings.lexicalTopic,
-        grammarTopic: room.settings.grammarTopic,
-        isWortstellung: String(room.settings.grammarTopic || '').includes('Wortstellung'),
-        count: DUEL_QUESTION_BATCH_SIZE,
-        exclude,
-      });
+      questions = await callGeneratedQuestionApi(buildDuelQuestionRequest(room, safeLine, exclude));
     } catch (error) {
       console.warn('Duel shared AI question generation fallback:', error.message);
     }
 
     const valid = questions.filter(isValidDuelQuestion);
-    room.questionDeck.push(...(valid.length ? valid : nextDuelFallbackQuestions(room, DUEL_QUESTION_BATCH_SIZE)));
-    room.questionStatus = 'ready';
-    room.questionFetch = null;
+    deck.push(...(valid.length ? valid : nextDuelFallbackQuestions(room, safeLine, DUEL_QUESTION_BATCH_SIZE)));
+    room.questionStatus[safeLine] = 'ready';
+    room.questionFetch[safeLine] = null;
     markDuelChanged(room);
   })().catch((error) => {
-    room.questionDeck.push(...nextDuelFallbackQuestions(room, DUEL_QUESTION_BATCH_SIZE));
-    room.questionStatus = 'ready';
-    room.questionFetch = null;
+    room.questionDeck[safeLine].push(...nextDuelFallbackQuestions(room, safeLine, DUEL_QUESTION_BATCH_SIZE));
+    room.questionStatus[safeLine] = 'ready';
+    room.questionFetch[safeLine] = null;
     markDuelChanged(room);
     console.warn('Duel question deck failed; using fallback:', error.message);
   });
 
-  return room.questionFetch;
+  return room.questionFetch[safeLine];
 }
 
-async function nextDuelQuestion(room, playerId) {
+async function nextDuelQuestion(room, playerId, line) {
   if (!room.players[playerId]) return { ok: false, error: 'unknown player' };
   if (room.phase !== 'playing') return { ok: false, error: 'room is not playing' };
+  const safeLine = normalizeDuelLine(line);
 
-  const cursor = room.questionCursor[playerId] || 0;
-  if (room.questionDeck.length <= cursor) {
-    await fillDuelQuestionDeck(room);
+  const cursor = room.questionCursor[playerId]?.[safeLine] || 0;
+  if (room.questionDeck[safeLine].length <= cursor) {
+    await fillDuelQuestionDeck(room, safeLine);
   }
 
-  const question = room.questionDeck[cursor];
+  const question = room.questionDeck[safeLine][cursor];
   if (!question) return { ok: false, error: 'question deck is empty' };
 
-  room.questionCursor[playerId] = cursor + 1;
+  room.questionCursor[playerId][safeLine] = cursor + 1;
   touchDuelRoom(room);
   return { ok: true, question: cloneDuelQuestion(question, cursor), state: publicDuelState(room) };
 }
@@ -452,71 +581,136 @@ function markDuelChanged(room) {
   touchDuelRoom(room);
 }
 
-function handleDuelFall(room, fallenId, attackerId) {
+function handleDuelFall(room, fallenId, attackerId, fall = {}) {
   const fallen = room.players[fallenId];
   if (!fallen) return;
 
+  const from = copyDuelPos(fall.from || fallen.pos);
+  const to = copyDuelPos(fall.to || fallen.pos);
   fallen.lives = Math.max(0, fallen.lives - 1);
   if (fallen.lives <= 0) {
     room.phase = 'finished';
     room.winner = attackerId || otherDuelPlayerId(fallenId);
     room.lastEvent = `${fallen.name} сорвался с края. Дуэль окончена.`;
+    setDuelAction(room, {
+      type: 'fall',
+      attackerId,
+      fallenId,
+      from,
+      to,
+      livesAfter: fallen.lives,
+      final: true,
+      roundReset: false,
+      winner: room.winner,
+      line: fall.line || null,
+      power: fall.power || 0,
+    });
     return;
   }
 
   room.lastEvent = `${fallen.name} сорвался с края. Раунд начинается заново.`;
   resetDuelRound(room);
+  setDuelAction(room, {
+    type: 'fall',
+    attackerId,
+    fallenId,
+    from,
+    to,
+    livesAfter: fallen.lives,
+    final: false,
+    roundReset: true,
+    resetPositions: duelStartPositions(),
+    line: fall.line || null,
+    power: fall.power || 0,
+  });
 }
 
-function moveDuelPlayer(room, playerId, target, maxDistance) {
+function moveDuelPlayer(room, playerId, target, maxDistance, meta = {}) {
   const player = room.players[playerId];
   const opponent = room.players[otherDuelPlayerId(playerId)];
   if (!player || !isInsideBoard(target)) return false;
   if (opponent && sameCell(opponent.pos, target)) return false;
   if (duelDistance(player.pos, target) < 1 || duelDistance(player.pos, target) > maxDistance) return false;
 
+  const from = copyDuelPos(player.pos);
   player.pos = { row: target.row, col: target.col };
   player.guarded = false;
   room.lastEvent = `${player.name} меняет позицию.`;
+  setDuelAction(room, {
+    type: 'move',
+    actorId: playerId,
+    from,
+    to: copyDuelPos(player.pos),
+    line: meta.line || null,
+    power: meta.power || 0,
+  });
   return true;
 }
 
-function guardDuelPlayer(room, playerId) {
+function guardDuelPlayer(room, playerId, meta = {}) {
   const player = room.players[playerId];
   if (!player) return false;
   player.guarded = true;
   player.shaky = false;
   room.lastEvent = `${player.name} упирается в стекло и готовит плечо к ответному удару.`;
+  setDuelAction(room, {
+    type: 'guard',
+    actorId: playerId,
+    atCell: copyDuelPos(player.pos),
+    line: meta.line || null,
+    power: meta.power || 0,
+  });
   return true;
 }
 
-function swapDuelPlayers(room, playerId, maxDistance) {
+function swapDuelPlayers(room, playerId, maxDistance, meta = {}) {
   const player = room.players[playerId];
   const opponent = room.players[otherDuelPlayerId(playerId)];
   if (!player || !opponent) return false;
   if (duelDistance(player.pos, opponent.pos) < 1 || duelDistance(player.pos, opponent.pos) > maxDistance) return false;
 
   const playerPos = { ...player.pos };
+  const opponentPos = { ...opponent.pos };
   player.pos = { ...opponent.pos };
   opponent.pos = playerPos;
   player.guarded = false;
   opponent.guarded = false;
   room.lastEvent = `${player.name} меняет угол атаки и оказывается на месте соперника.`;
+  setDuelAction(room, {
+    type: 'swap',
+    actorId: playerId,
+    targetId: opponent.id,
+    actorFrom: copyDuelPos(playerPos),
+    actorTo: copyDuelPos(player.pos),
+    targetFrom: copyDuelPos(opponentPos),
+    targetTo: copyDuelPos(opponent.pos),
+    line: meta.line || null,
+    power: meta.power || 0,
+  });
   return true;
 }
 
-function pushDuelPlayer(room, attackerId, distance) {
+function pushDuelPlayer(room, attackerId, distance, meta = {}) {
   const attacker = room.players[attackerId];
   const defenderId = otherDuelPlayerId(attackerId);
   const defender = room.players[defenderId];
   if (!attacker || !defender || duelDistance(attacker.pos, defender.pos) !== 1) return false;
 
   attacker.guarded = false;
+  const defenderFrom = copyDuelPos(defender.pos);
   let pushDistance = Math.max(1, Math.min(2, Number(distance) || 1));
   if (defender.guarded) {
     defender.guarded = false;
     defender.shaky = false;
     room.lastEvent = `${defender.name} выдерживает толчок и не отдаёт край.`;
+    setDuelAction(room, {
+      type: 'guardBlock',
+      actorId: attackerId,
+      targetId: defenderId,
+      atCell: defenderFrom,
+      line: meta.line || null,
+      power: meta.power || 0,
+    });
     return true;
   }
 
@@ -533,12 +727,27 @@ function pushDuelPlayer(room, attackerId, distance) {
   };
 
   if (!isInsideBoard(target)) {
-    handleDuelFall(room, defenderId, attackerId);
+    handleDuelFall(room, defenderId, attackerId, {
+      from: defenderFrom,
+      to: target,
+      line: meta.line || null,
+      power: meta.power || pushDistance,
+    });
     return true;
   }
 
   defender.pos = target;
   room.lastEvent = `${attacker.name} отталкивает ${defender.name}.`;
+  setDuelAction(room, {
+    type: 'push',
+    actorId: attackerId,
+    targetId: defenderId,
+    from: defenderFrom,
+    to: copyDuelPos(target),
+    distance: pushDistance,
+    line: meta.line || null,
+    power: meta.power || pushDistance,
+  });
   return true;
 }
 
@@ -554,8 +763,9 @@ function autoStepToward(room, moverId, targetId) {
 
   for (const pos of candidates) {
     if (!sameCell(pos, target.pos)) {
+      const from = copyDuelPos(mover.pos);
       mover.pos = pos;
-      return true;
+      return { from, to: copyDuelPos(mover.pos) };
     }
   }
   return false;
@@ -570,18 +780,41 @@ function applyDuelPenalty(room, playerId, correctBefore) {
   if (correctBefore <= 0) {
     player.shaky = true;
     room.lastEvent = `${player.name} теряет равновесие. Следующий толчок будет опаснее.`;
+    setDuelAction(room, {
+      type: 'penalty',
+      actorId: playerId,
+      targetId: opponentId,
+      atCell: copyDuelPos(player.pos),
+      correctBefore,
+    });
   } else if (correctBefore === 1) {
-    autoStepToward(room, opponentId, playerId);
+    const step = autoStepToward(room, opponentId, playerId);
     room.lastEvent = `${player.name} сорвал серию. ${opponent.name} получает короткий шаг.`;
+    setDuelAction(room, {
+      type: 'penaltyStep',
+      actorId: playerId,
+      targetId: opponentId,
+      from: step?.from || copyDuelPos(opponent.pos),
+      to: step?.to || copyDuelPos(opponent.pos),
+      correctBefore,
+    });
   } else {
     if (duelDistance(player.pos, opponent.pos) === 1) {
-      pushDuelPlayer(room, opponentId, 1);
-      if (room.phase !== 'finished') {
+      pushDuelPlayer(room, opponentId, 1, { line: 'penalty', power: 1 });
+      if (room.phase !== 'finished' && room.lastAction?.type !== 'fall') {
         room.lastEvent = `${player.name} рискнул слишком глубоко. ${opponent.name} отвечает толчком.`;
       }
     } else {
-      autoStepToward(room, opponentId, playerId);
+      const step = autoStepToward(room, opponentId, playerId);
       room.lastEvent = `${player.name} теряет почти готовый ход. ${opponent.name} сокращает дистанцию.`;
+      setDuelAction(room, {
+        type: 'penaltyStep',
+        actorId: playerId,
+        targetId: opponentId,
+        from: step?.from || copyDuelPos(opponent.pos),
+        to: step?.to || copyDuelPos(opponent.pos),
+        correctBefore,
+      });
     }
   }
   return true;
@@ -595,16 +828,29 @@ function applyDuelAction(room, playerId, action = {}) {
   if (action.type === 'move') {
     const power = Math.max(1, Math.min(3, Number(action.power) || 1));
     const maxDistance = power >= 2 ? 2 : 1;
-    changed = moveDuelPlayer(room, playerId, action.target, maxDistance);
+    changed = moveDuelPlayer(room, playerId, action.target, maxDistance, {
+      line: normalizeDuelLine(action.line),
+      power,
+    });
   } else if (action.type === 'push') {
     const power = Math.max(1, Math.min(3, Number(action.power) || 1));
     const grammarPush = action.line === 'grammar' && power >= 2;
-    changed = pushDuelPlayer(room, playerId, grammarPush || power >= 3 ? 2 : 1);
+    changed = pushDuelPlayer(room, playerId, grammarPush || power >= 3 ? 2 : 1, {
+      line: normalizeDuelLine(action.line),
+      power,
+    });
   } else if (action.type === 'swap') {
     const power = Math.max(1, Math.min(3, Number(action.power) || 1));
-    changed = power >= 2 && swapDuelPlayers(room, playerId, 2);
+    changed = power >= 2 && swapDuelPlayers(room, playerId, 2, {
+      line: normalizeDuelLine(action.line),
+      power,
+    });
   } else if (action.type === 'guard') {
-    changed = guardDuelPlayer(room, playerId);
+    const power = Math.max(1, Math.min(3, Number(action.power) || 1));
+    changed = guardDuelPlayer(room, playerId, {
+      line: normalizeDuelLine(action.line),
+      power,
+    });
   } else if (action.type === 'penalty') {
     changed = applyDuelPenalty(room, playerId, Math.max(0, Math.min(2, Number(action.correctBefore) || 0)));
   }
@@ -669,6 +915,7 @@ async function handleDuelApi(req, res) {
     room.phase = 'playing';
     room.turn = null;
     room.lastEvent = `${room.players.p2.name} подключился. Оба игрока на стекле.`;
+    setDuelAction(room, { type: 'join', actorId: 'p2' });
     markDuelChanged(room);
     sendJson(res, 200, { roomId: room.id, playerId: 'p2', state: publicDuelState(room) });
     return;
@@ -703,7 +950,7 @@ async function handleDuelApi(req, res) {
       sendJson(res, 410, { error: 'host left', state: publicDuelState(room) });
       return;
     }
-    const result = await nextDuelQuestion(room, body.playerId);
+    const result = await nextDuelQuestion(room, body.playerId, body.line);
     sendJson(res, result.ok ? 200 : 400, result.ok ? result : { error: result.error, state: publicDuelState(room) });
     return;
   }

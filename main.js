@@ -221,6 +221,11 @@ const STATE = {
     questionLocked: false,
     actionPower: 0,
     mannequins: {},
+    visualLocks: {},
+    visualAnims: [],
+    fallView: null,
+    seenActionId: 0,
+    bannerTimer: null,
   },
 
   aviationLights: [],
@@ -1179,6 +1184,10 @@ const duelClaimEl = document.getElementById('duel-claim');
 const duelClaimBtn = document.getElementById('duel-claim-btn');
 const duelRiskBtn = document.getElementById('duel-risk-btn');
 const duelActionPanel = document.getElementById('duel-action-panel');
+const duelEventBanner = document.getElementById('duel-event-banner');
+const duelEventKicker = document.getElementById('duel-event-kicker');
+const duelEventTitle = document.getElementById('duel-event-title');
+const duelEventText = document.getElementById('duel-event-text');
 if (quizEl) quizEl.classList.add('hidden');
 if (timerFill) timerFill.style.transform = 'scaleX(1)';
 if (timerLabel) timerLabel.textContent = '';
@@ -1504,6 +1513,113 @@ const DUEL_DIRS = [
   { label: 'Вправо', row: 0, col: 1 },
 ];
 
+const duelAudio = {
+  ctx: null,
+};
+
+function ensureDuelAudio() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!duelAudio.ctx) duelAudio.ctx = new AudioContextClass();
+  if (duelAudio.ctx.state === 'suspended') {
+    duelAudio.ctx.resume().catch(() => {});
+  }
+  return duelAudio.ctx;
+}
+
+function playDuelTone(ctx, freq, start, duration, gainAmount, type = 'sine') {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, gainAmount), start + 0.018);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + duration + 0.03);
+}
+
+function playDuelNoise(ctx, start, duration, gainAmount, filterFreq = 900) {
+  const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+  }
+  const source = ctx.createBufferSource();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+  source.buffer = buffer;
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(filterFreq, start);
+  filter.Q.setValueAtTime(0.9, start);
+  gain.gain.setValueAtTime(gainAmount, start);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(start);
+  source.stop(start + duration + 0.02);
+}
+
+function playDuelSound(kind) {
+  const ctx = ensureDuelAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  if (kind === 'question') {
+    playDuelTone(ctx, 440, now, 0.09, 0.035, 'triangle');
+    playDuelTone(ctx, 660, now + 0.08, 0.12, 0.035, 'triangle');
+  } else if (kind === 'correct') {
+    playDuelTone(ctx, 620, now, 0.1, 0.055, 'sine');
+    playDuelTone(ctx, 930, now + 0.08, 0.16, 0.045, 'sine');
+  } else if (kind === 'wrong') {
+    playDuelTone(ctx, 180, now, 0.18, 0.06, 'sawtooth');
+    playDuelTone(ctx, 116, now + 0.08, 0.24, 0.045, 'sawtooth');
+    playDuelNoise(ctx, now, 0.18, 0.035, 260);
+  } else if (kind === 'move') {
+    playDuelNoise(ctx, now, 0.11, 0.04, 520);
+    playDuelTone(ctx, 210, now, 0.09, 0.04, 'triangle');
+  } else if (kind === 'push') {
+    playDuelNoise(ctx, now, 0.22, 0.075, 760);
+    playDuelTone(ctx, 96, now, 0.18, 0.08, 'square');
+    playDuelTone(ctx, 300, now + 0.08, 0.09, 0.035, 'triangle');
+  } else if (kind === 'guard') {
+    playDuelTone(ctx, 260, now, 0.12, 0.045, 'triangle');
+    playDuelTone(ctx, 392, now + 0.04, 0.18, 0.035, 'triangle');
+  } else if (kind === 'swap') {
+    playDuelNoise(ctx, now, 0.28, 0.045, 1350);
+    playDuelTone(ctx, 520, now + 0.02, 0.12, 0.035, 'sine');
+    playDuelTone(ctx, 780, now + 0.12, 0.14, 0.035, 'sine');
+  } else if (kind === 'fall') {
+    playDuelNoise(ctx, now, 0.7, 0.075, 420);
+    playDuelTone(ctx, 220, now, 0.28, 0.08, 'sawtooth');
+    playDuelTone(ctx, 92, now + 0.22, 0.46, 0.065, 'sawtooth');
+  } else if (kind === 'round') {
+    playDuelTone(ctx, 330, now, 0.18, 0.05, 'triangle');
+    playDuelTone(ctx, 495, now + 0.05, 0.2, 0.045, 'triangle');
+    playDuelTone(ctx, 740, now + 0.1, 0.24, 0.04, 'triangle');
+  }
+}
+
+function showDuelEventBanner(kicker, title, text, tone = 'danger') {
+  if (!duelEventBanner) return;
+  if (STATE.duel.bannerTimer) clearTimeout(STATE.duel.bannerTimer);
+  if (duelEventKicker) duelEventKicker.textContent = kicker;
+  if (duelEventTitle) duelEventTitle.textContent = title;
+  if (duelEventText) duelEventText.textContent = text;
+  duelEventBanner.classList.remove('hidden', 'danger');
+  if (tone) duelEventBanner.classList.add(tone);
+  duelEventBanner.style.animation = 'none';
+  void duelEventBanner.offsetWidth;
+  duelEventBanner.style.animation = '';
+  STATE.duel.bannerTimer = setTimeout(() => {
+    duelEventBanner.classList.add('hidden');
+  }, 2850);
+}
+
 function getDuelSettings() {
   const settings = dashboard.getSettings();
   const firstSlot = settings.grammarSlots.find((slot) => slot?.grammarTopic) || settings.grammarSlots[0];
@@ -1530,6 +1646,7 @@ function setDuelMenuStatus(text) {
 }
 
 function openDuelMenu() {
+  ensureDuelAudio();
   const name = dashboard.playerName?.value.trim() || localStorage.getItem('flammen_player_name') || '';
   if (duelPlayerNameInput && !duelPlayerNameInput.value.trim()) duelPlayerNameInput.value = name;
   duelMenuEl?.classList.remove('hidden');
@@ -1582,6 +1699,7 @@ async function pollDuelState() {
 }
 
 async function createDuelRoom() {
+  ensureDuelAudio();
   try {
     const settings = getDuelSettings();
     const name = duelPlayerNameInput?.value.trim() || settings.playerName || 'Spieler 1';
@@ -1596,6 +1714,7 @@ async function createDuelRoom() {
 }
 
 async function joinDuelRoom(roomId = duelRoomInput?.value.trim()) {
+  ensureDuelAudio();
   const cleanRoomId = String(roomId || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!cleanRoomId) {
     setDuelMenuStatus('Введи код комнаты.');
@@ -1626,6 +1745,10 @@ function enterDuelMode(roomId, playerId, state) {
   STATE.duel.currentQuestion = null;
   STATE.duel.questionLocked = false;
   STATE.duel.actionPower = 0;
+  STATE.duel.visualLocks = {};
+  STATE.duel.visualAnims = [];
+  STATE.duel.fallView = null;
+  STATE.duel.seenActionId = 0;
 
   const settings = state?.settings || getDuelSettings();
   configureDuelQuestionBank(settings);
@@ -1651,12 +1774,20 @@ function leaveDuelMode() {
   stopDuelPolling();
   STATE.mode = 'solo';
   STATE.duel.active = false;
+  if (STATE.duel.bannerTimer) {
+    clearTimeout(STATE.duel.bannerTimer);
+    STATE.duel.bannerTimer = null;
+  }
+  duelEventBanner?.classList.add('hidden');
   duelHud?.classList.add('hidden');
   Object.values(STATE.duel.mannequins).forEach((mannequin) => {
     scene.remove(mannequin);
     disposeObject(mannequin);
   });
   STATE.duel.mannequins = {};
+  STATE.duel.visualLocks = {};
+  STATE.duel.visualAnims = [];
+  STATE.duel.fallView = null;
 }
 
 function applyDuelState(state) {
@@ -1682,6 +1813,7 @@ function applyDuelState(state) {
   }
 
   syncDuelMannequins(state);
+  handleDuelActionEvent(state.lastAction);
   renderDuelTurnPanel();
 }
 
@@ -1772,6 +1904,7 @@ function setDuelRiskButtonsDisabled(disabled) {
 }
 
 async function startDuelSeries(line) {
+  ensureDuelAudio();
   if (!canPlayDuelNow()) return;
   if (
     STATE.duel.questionLocked ||
@@ -1791,6 +1924,7 @@ async function startDuelSeries(line) {
 
 async function askDuelQuestion() {
   const line = DUEL_LINES[STATE.duel.seriesLine] || DUEL_LINES.grammar;
+  playDuelSound('question');
   STATE.duel.currentQuestion = null;
   STATE.duel.questionLocked = true;
   setDuelRiskButtonsDisabled(true);
@@ -1850,6 +1984,7 @@ async function answerDuelQuestion(index, button) {
   duelOptionsEl?.querySelectorAll('button').forEach((option) => { option.disabled = true; });
 
   if (!correct) {
+    playDuelSound('wrong');
     button?.classList.add('wrong');
     await sendDuelAction({
       type: 'penalty',
@@ -1861,6 +1996,7 @@ async function answerDuelQuestion(index, button) {
   }
 
   button?.classList.add('correct');
+  playDuelSound('correct');
   STATE.duel.seriesCorrect += 1;
   STATE.duel.currentQuestion = null;
 
@@ -1887,11 +2023,13 @@ function clearDuelSeries() {
 }
 
 function claimDuelPower() {
+  ensureDuelAudio();
   const power = Math.max(1, STATE.duel.seriesCorrect);
   showDuelActions(power);
 }
 
 async function riskDuelNextQuestion() {
+  ensureDuelAudio();
   STATE.duel.seriesStep += 1;
   await askDuelQuestion();
 }
@@ -2061,6 +2199,160 @@ async function commitDuelGuard(power, line) {
   }
 }
 
+function easeOutCubic(x) {
+  return 1 - Math.pow(1 - THREE.MathUtils.clamp(x, 0, 1), 3);
+}
+
+function duelWorldPosition(cell) {
+  const row = Number(cell?.row ?? 0);
+  const col = Number(cell?.col ?? Math.floor(DUEL_BOARD_SIZE / 2));
+  const clampedRow = THREE.MathUtils.clamp(row, 0, BRIDGE_ROWS - 1);
+  const clampedCol = THREE.MathUtils.clamp(col, 0, BRIDGE_COLS - 1);
+  const rowOffset = row - clampedRow;
+  const colOffset = col - clampedCol;
+  const cellLen = STATE.bridgeLength / BRIDGE_ROWS || TILE_SIZE;
+  return cellWorldPosition(clampedRow, clampedCol)
+    .addScaledVector(STATE.forwardDir, rowOffset * cellLen)
+    .addScaledVector(STATE.rightDir, colOffset * (TILE_SIZE + TILE_GAP));
+}
+
+function duelPlayerName(playerId) {
+  return STATE.duel.state?.players?.[playerId]?.name || (playerId === 'p1' ? 'Spieler 1' : 'Spieler 2');
+}
+
+function startDuelMannequinAnimation(playerId, fromCell, toCell, options = {}) {
+  if (!playerId || playerId === STATE.duel.playerId) return;
+  ensureDuelMannequins();
+  const mannequin = STATE.duel.mannequins[playerId];
+  if (!mannequin) return;
+
+  const now = performance.now();
+  const duration = options.duration || (options.fall ? 2300 : 420);
+  const from = duelWorldPosition(fromCell);
+  const to = duelWorldPosition(toCell || fromCell);
+  STATE.duel.visualLocks[playerId] = now + duration + 180;
+  STATE.duel.visualAnims = STATE.duel.visualAnims.filter((anim) => anim.playerId !== playerId);
+  STATE.duel.visualAnims.push({
+    playerId,
+    start: now,
+    duration,
+    from,
+    to,
+    fall: Boolean(options.fall),
+    spin: playerId === 'p1' ? -1 : 1,
+  });
+  mannequin.visible = true;
+  mannequin.position.copy(from);
+  mannequin.position.y += 0.1;
+}
+
+function startDuelFallView(action) {
+  const from = duelWorldPosition(action.from);
+  const to = duelWorldPosition(action.to || action.from);
+  STATE.duel.fallView = {
+    start: performance.now(),
+    duration: FALL_DURATION_MS,
+    from,
+    to,
+    yaw: STATE.player.yaw,
+    pitch: STATE.player.pitch,
+    roll: STATE.duel.playerId === 'p1' ? 1 : -1,
+  };
+}
+
+function updateDuelVisuals(t, dt) {
+  if (!STATE.duel.visualAnims.length) return;
+  STATE.duel.visualAnims = STATE.duel.visualAnims.filter((anim) => {
+    const mannequin = STATE.duel.mannequins[anim.playerId];
+    if (!mannequin) return false;
+    const p = THREE.MathUtils.clamp((t - anim.start) / anim.duration, 0, 1);
+    const e = easeOutCubic(p);
+    mannequin.position.copy(anim.from).lerp(anim.to, e);
+    mannequin.position.y += 0.1;
+    if (anim.fall) {
+      mannequin.position.y -= Math.pow(p, 2.05) * 34;
+      mannequin.rotation.x = p * Math.PI * 1.25 * anim.spin;
+      mannequin.rotation.z = Math.sin(p * Math.PI) * 0.9 * anim.spin;
+    } else {
+      mannequin.position.y += Math.sin(p * Math.PI) * 0.18;
+      mannequin.rotation.z = Math.sin(p * Math.PI) * 0.12 * anim.spin;
+    }
+    mannequin.rotation.y = (anim.playerId === 'p1' ? STATE.bridgeYaw : STATE.bridgeYaw + Math.PI) + p * 0.55 * anim.spin;
+    mannequin.visible = true;
+    return p < 1;
+  });
+
+  const now = performance.now();
+  for (const [playerId, until] of Object.entries(STATE.duel.visualLocks)) {
+    if (until <= now) delete STATE.duel.visualLocks[playerId];
+  }
+}
+
+function handleDuelActionEvent(action) {
+  if (!action || !Number.isFinite(Number(action.id)) || Number(action.id) <= STATE.duel.seenActionId) return;
+  STATE.duel.seenActionId = Number(action.id);
+
+  const me = STATE.duel.playerId;
+  if (action.type === 'join') {
+    playDuelSound('round');
+    return;
+  }
+
+  if (action.type === 'move') {
+    playDuelSound('move');
+    startDuelMannequinAnimation(action.actorId, action.from, action.to);
+    return;
+  }
+
+  if (action.type === 'push') {
+    playDuelSound('push');
+    startDuelMannequinAnimation(action.targetId, action.from, action.to, { duration: 560 });
+    return;
+  }
+
+  if (action.type === 'guard' || action.type === 'guardBlock') {
+    playDuelSound('guard');
+    return;
+  }
+
+  if (action.type === 'swap') {
+    playDuelSound('swap');
+    startDuelMannequinAnimation(action.actorId, action.actorFrom, action.actorTo, { duration: 620 });
+    startDuelMannequinAnimation(action.targetId, action.targetFrom, action.targetTo, { duration: 620 });
+    return;
+  }
+
+  if (action.type === 'penalty') {
+    if (action.actorId !== me) playDuelSound('wrong');
+    return;
+  }
+
+  if (action.type === 'penaltyStep') {
+    playDuelSound('move');
+    startDuelMannequinAnimation(action.targetId, action.from, action.to, { duration: 520 });
+    return;
+  }
+
+  if (action.type === 'fall') {
+    clearDuelSeries();
+    playDuelSound('fall');
+    setTimeout(() => playDuelSound('round'), 320);
+    if (action.fallenId === me) {
+      startDuelFallView(action);
+    } else {
+      startDuelMannequinAnimation(action.fallenId, action.from, action.to, { fall: true, duration: 2350 });
+    }
+    const fallenName = duelPlayerName(action.fallenId);
+    const winnerName = duelPlayerName(action.winner || action.attackerId);
+    showDuelEventBanner(
+      action.final ? 'Дуэль завершена' : 'Раунд завершён',
+      `${fallenName}: -1 жизнь`,
+      action.final ? `${winnerName} забирает мост.` : `Осталось жизней: ${Math.max(0, action.livesAfter ?? 0)}`,
+      'danger',
+    );
+  }
+}
+
 function createMannequin(color) {
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({
@@ -2114,6 +2406,10 @@ function syncDuelMannequins(state) {
     const player = state.players?.[id];
     const mannequin = STATE.duel.mannequins[id];
     if (!mannequin) continue;
+    if (STATE.duel.visualLocks[id] && STATE.duel.visualLocks[id] > performance.now()) {
+      mannequin.visible = true;
+      continue;
+    }
     mannequin.visible = Boolean(player) && id !== STATE.duel.playerId;
     if (!player) continue;
     const target = cellWorldPosition(player.pos.row, player.pos.col);
@@ -2124,6 +2420,29 @@ function syncDuelMannequins(state) {
 }
 
 function updateDuelCamera() {
+  const fall = STATE.duel.fallView;
+  if (fall) {
+    const p = THREE.MathUtils.clamp((performance.now() - fall.start) / fall.duration, 0, 1);
+    const e = easeOutCubic(p);
+    camera.position.copy(fall.from).lerp(fall.to, e);
+    camera.position.y += PLAYER_EYE - Math.pow(p, 2.05) * 38;
+    const yaw = fall.yaw + Math.sin(p * Math.PI) * 0.22 * fall.roll;
+    const pitch = fall.pitch - p * 1.05;
+    const lookDir = new THREE.Vector3(
+      -Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      -Math.cos(yaw) * Math.cos(pitch),
+    );
+    camera.lookAt(camera.position.clone().add(lookDir));
+    camera.rotation.z += p * 0.38 * fall.roll;
+    if (altitudeEl) altitudeEl.textContent = `${Math.max(0, Math.round(camera.position.y - 1))} м`;
+    if (p >= 1) {
+      STATE.duel.fallView = null;
+      resetDuelViewForPlayer(STATE.duel.playerId);
+    }
+    return;
+  }
+
   const me = STATE.duel.state?.players?.[STATE.duel.playerId];
   if (!me) return;
 
@@ -3198,6 +3517,7 @@ function animate(frameTime = performance.now()) {
   }
 
   updateGame(t);
+  if (STATE.mode === 'duel') updateDuelVisuals(t, dt);
 
   for (let i = 0; i < STATE.tiles.length; i++) {
     const tile = STATE.tiles[i];

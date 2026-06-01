@@ -238,6 +238,79 @@ canvas#scene {
   color: #91ffd8;
   margin-right: 8px;
 }
+.duel-event-banner {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: min(620px, calc(100vw - 28px));
+  transform: translate(-50%, -50%);
+  padding: 20px 24px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(23, 27, 45, 0.88), rgba(7, 13, 26, 0.92)),
+    radial-gradient(circle at 18% 20%, rgba(255, 211, 86, 0.45), transparent 38%),
+    radial-gradient(circle at 82% 12%, rgba(116, 244, 255, 0.38), transparent 34%),
+    radial-gradient(circle at 74% 88%, rgba(255, 90, 122, 0.32), transparent 36%);
+  box-shadow:
+    0 22px 90px rgba(0, 0, 0, 0.62),
+    0 0 42px rgba(112, 246, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  text-align: center;
+  animation: duelBannerPop 2.85s ease both;
+}
+.duel-event-banner.danger {
+  border-color: rgba(255, 106, 126, 0.44);
+  box-shadow:
+    0 22px 90px rgba(0, 0, 0, 0.64),
+    0 0 52px rgba(255, 87, 119, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.duel-event-kicker {
+  color: #91ffd8;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.duel-event-title {
+  margin-top: 8px;
+  font-size: clamp(30px, 6vw, 58px);
+  font-weight: 900;
+  line-height: 0.96;
+  text-shadow:
+    0 0 18px rgba(112, 246, 255, 0.36),
+    0 4px 24px rgba(0, 0, 0, 0.45);
+}
+.duel-event-text {
+  margin-top: 10px;
+  color: #f7d878;
+  font-size: clamp(14px, 2.4vw, 20px);
+  font-weight: 800;
+}
+@keyframes duelBannerPop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.88);
+    filter: blur(8px);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04);
+    filter: blur(0);
+  }
+  78% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -56%) scale(0.96);
+  }
+}
 .duel-panel {
   pointer-events: auto;
   position: absolute;
@@ -933,6 +1006,14 @@ canvas#scene {
     width: calc(100vw - 18px);
     max-height: calc(100dvh - 118px - max(12px, env(safe-area-inset-bottom)));
     padding: 12px;
+  }
+  .duel-event-banner {
+    top: 38%;
+    width: calc(100vw - 24px);
+    padding: 16px 14px 18px;
+  }
+  .duel-event-title {
+    font-size: clamp(28px, 10vw, 44px);
   }
   #duel-status {
     font-size: 13px;

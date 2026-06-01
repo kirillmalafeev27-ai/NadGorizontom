@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Glass Bridge - Nad Gorizontom</title>
-<link rel="stylesheet" href="styles.css?v=duel-network-fp1" />
+<link rel="stylesheet" href="styles.css?v=duel-visual-audio-1" />
 <script type="importmap">
 {
   "imports": {
@@ -89,6 +89,12 @@ window.addEventListener('error', function (event) {
     </div>
     <div id="duel-lives">—</div>
     <div id="duel-turn-label">—</div>
+  </div>
+
+  <div id="duel-event-banner" class="duel-event-banner hidden" aria-live="polite">
+    <div id="duel-event-kicker" class="duel-event-kicker">Раунд завершён</div>
+    <div id="duel-event-title" class="duel-event-title"></div>
+    <div id="duel-event-text" class="duel-event-text"></div>
   </div>
 
   <div id="duel-panel" class="duel-panel">
@@ -233,6 +239,6 @@ window.addEventListener('error', function (event) {
   </div>
 </div>
 
-<script type="module" src="main.js?v=duel-network-fp3"></script>
+<script type="module" src="main.js?v=duel-visual-audio-1"></script>
 </body>
 </html>
