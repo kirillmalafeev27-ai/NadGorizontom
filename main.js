@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { clearAudioQuestion, playAudioQuestion } from './audio.js';
 import {
   GRAMMAR_TOPICS,
   LANGUAGE_LEVELS,
@@ -1221,6 +1222,9 @@ const dashboard = {
   progressSteps: Array.from(document.querySelectorAll('.progress-step')),
   levelButtons: document.getElementById('level-buttons'),
   difficultyButtons: document.getElementById('difficulty-buttons'),
+  questionModeButtons: document.getElementById('question-mode-buttons'),
+  audioModeHint: document.getElementById('audio-mode-hint'),
+  grammarSetup: document.getElementById('grammar-setup'),
   lexicalGrid: document.getElementById('lexical-grid'),
   ritualSlots: document.getElementById('ritual-slots'),
   grammarPicker: document.getElementById('grammar-picker'),
@@ -1228,6 +1232,7 @@ const dashboard = {
   selectedStep: 1,
   selectedLevel: null,
   selectedDifficulty: 'hard',
+  selectedQuestionMode: 'grammar',
   selectedLexical: null,
   selectedGrammar: null,
   selectedSlotIndex: null,
@@ -1262,6 +1267,9 @@ const dashboard = {
       if (DIFFICULTIES.some((difficulty) => difficulty.id === state.selectedDifficulty)) {
         this.selectedDifficulty = state.selectedDifficulty;
       }
+      if (state.selectedQuestionMode === 'audio' || state.selectedQuestionMode === 'grammar') {
+        this.selectedQuestionMode = state.selectedQuestionMode;
+      }
       if (LEXICAL_TOPICS.includes(state.selectedLexical)) this.selectedLexical = state.selectedLexical;
       if (Array.isArray(state.slotAssignments)) {
         this.slotAssignments = Array.from({ length: GRAMMAR_SLOT_COUNT }, (_, index) => {
@@ -1284,6 +1292,7 @@ const dashboard = {
       localStorage.setItem(MENU_STATE_KEY, JSON.stringify({
         selectedLevel: this.selectedLevel,
         selectedDifficulty: this.selectedDifficulty,
+        selectedQuestionMode: this.selectedQuestionMode,
         selectedLexical: this.selectedLexical,
         selectedStep: this.selectedStep,
         slotAssignments: this.slotAssignments,
@@ -1296,6 +1305,7 @@ const dashboard = {
   populate() {
     this.renderLevelButtons();
     this.renderDifficultyButtons();
+    this.renderQuestionModeButtons();
     this.renderLexicalGrid();
     this.renderSlots();
     this.renderGrammarPicker();
@@ -1363,6 +1373,42 @@ const dashboard = {
       });
       this.difficultyButtons.appendChild(button);
     }
+  },
+
+  renderQuestionModeButtons() {
+    if (!this.questionModeButtons) return;
+    const modes = [
+      {
+        id: 'grammar',
+        title: '\u0413\u0440\u0430\u043c\u043c\u0430\u0442\u0438\u043a\u0430',
+        desc: '\u0442\u0435\u043c\u044b \u0440\u0430\u0441\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u044b \u043f\u043e \u043a\u043e\u043b\u043e\u043d\u043a\u0430\u043c'
+      },
+      {
+        id: 'audio',
+        title: '\u0410\u0443\u0434\u0438\u043e',
+        desc: '\u0441\u043b\u0443\u0448\u0430\u0439 \u0444\u0440\u0430\u0437\u0443 \u0438 \u0432\u044b\u0431\u0438\u0440\u0430\u0439 \u043f\u0435\u0440\u0435\u0432\u043e\u0434'
+      },
+    ];
+
+    this.questionModeButtons.innerHTML = '';
+    for (const mode of modes) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'question-mode-btn';
+      button.innerHTML = `<span class="level-code">${mode.title}</span><span class="level-desc">${mode.desc}</span>`;
+      button.classList.toggle('selected', this.selectedQuestionMode === mode.id);
+      button.addEventListener('click', () => {
+        this.selectedQuestionMode = mode.id;
+        this.renderQuestionModeButtons();
+        this.updateStartButton();
+        this.saveState();
+      });
+      this.questionModeButtons.appendChild(button);
+    }
+
+    const audioMode = this.selectedQuestionMode === 'audio';
+    this.grammarSetup?.classList.toggle('hidden', audioMode);
+    this.audioModeHint?.classList.toggle('hidden', !audioMode);
   },
 
   renderLexicalGrid() {
@@ -1446,7 +1492,11 @@ const dashboard = {
   },
 
   isComplete() {
-    return Boolean(this.selectedLevel && this.selectedLexical && this.slotAssignments.every(Boolean));
+    return Boolean(
+      this.selectedLevel &&
+      this.selectedLexical &&
+      (this.selectedQuestionMode === 'audio' || this.slotAssignments.every(Boolean))
+    );
   },
 
   setReady(isReady) {
@@ -1471,6 +1521,7 @@ const dashboard = {
       playerName,
       langLevel: this.selectedLevel || 'A2',
       difficulty: this.selectedDifficulty || 'hard',
+      questionMode: this.selectedQuestionMode || 'grammar',
       lexicalTopic: this.selectedLexical || LEXICAL_TOPICS[0],
       grammarSlots: this.slotAssignments.map((grammarTopic, index) => ({
         grammarTopic,
@@ -1763,6 +1814,7 @@ async function joinDuelRoom(roomId = duelRoomInput?.value.trim()) {
 }
 
 function enterDuelMode(roomId, playerId, state) {
+  clearAudioQuestion();
   STATE.mode = 'duel';
   STATE.active = false;
   STATE.paused = false;
@@ -2649,6 +2701,7 @@ function setQuestionControlsOpen(isOpen) {
 }
 
 function clearQuestion() {
+  clearAudioQuestion();
   STATE.currentQuestion = null;
   STATE.questionLoading = false;
   STATE.questionLocked = false;
@@ -2694,6 +2747,7 @@ function normalizeBridgeQuestion(rawQuestion) {
 }
 
 function showQuestionLoading(slot) {
+  clearAudioQuestion();
   STATE.questionLoading = true;
   STATE.questionLocked = true;
   STATE.currentQuestion = null;
@@ -2749,6 +2803,12 @@ function displayQuestion(question, options = {}) {
   quizEl.classList.remove('hidden');
   setQuestionControlsOpen(true);
   moveControls?.classList.add('locked');
+
+  if (locked) {
+    clearAudioQuestion();
+  } else {
+    void playAudioQuestion(STATE.currentQuestion.meta || STATE.currentQuestion);
+  }
 
   if (armTile) {
     const idx = currentTileIndex();
@@ -2856,6 +2916,7 @@ function onAnswer(idx, button) {
 }
 
 function enterPlay(options = {}) {
+  clearAudioQuestion();
   if (STATE.mode === 'duel') leaveDuelMode();
   STATE.mode = 'solo';
   STATE.bridgeLevel = 1;
@@ -2888,6 +2949,7 @@ function enterPlay(options = {}) {
 }
 
 function showIntro() {
+  clearAudioQuestion();
   stepTotal.textContent = String(BRIDGE_ROWS);
   stepNumber.textContent = '0';
   intro.classList.remove('hidden');
@@ -3469,6 +3531,7 @@ function updateMovementGame(t) {
 }
 
 function startSecondLevel() {
+  clearAudioQuestion();
   STATE.bridgeLevel = 2;
   rebuildRun();
   intro.classList.add('hidden');
@@ -3498,6 +3561,7 @@ function onWin() {
     return;
   }
 
+  clearAudioQuestion();
   STATE.won = true;
   STATE.active = false;
   STATE.currentQuestion = null;
@@ -3516,6 +3580,7 @@ function onWin() {
 
 function triggerFall() {
   if (STATE.falling) return;
+  clearAudioQuestion();
   STATE.falling = true;
   STATE.active = false;
   STATE.paused = false;

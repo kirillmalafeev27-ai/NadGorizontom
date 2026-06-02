@@ -324,6 +324,75 @@ const QUESTION_POOL = [
     }
 ];
 
+const AUDIO_QUESTION_POOL = [
+    {
+        level: 'A1',
+        audioText: 'Ich kaufe heute Brot und K\u00e4se.',
+        options: [
+            '\u0421\u0435\u0433\u043e\u0434\u043d\u044f \u044f \u043f\u043e\u043a\u0443\u043f\u0430\u044e \u0445\u043b\u0435\u0431 \u0438 \u0441\u044b\u0440.',
+            '\u0421\u0435\u0433\u043e\u0434\u043d\u044f \u044f \u043f\u0440\u043e\u0434\u0430\u044e \u0445\u043b\u0435\u0431 \u0438 \u0441\u044b\u0440.',
+            '\u0421\u0435\u0433\u043e\u0434\u043d\u044f \u044f \u043f\u043e\u043a\u0443\u043f\u0430\u044e \u0431\u0443\u043b\u043e\u0447\u043a\u0438 \u0438 \u0441\u044b\u0440.',
+            '\u0421\u0435\u0433\u043e\u0434\u043d\u044f \u044f \u043f\u043e\u043a\u0443\u043f\u0430\u044e \u0445\u043b\u0435\u0431 \u0438 \u043a\u043e\u043b\u0431\u0430\u0441\u0443.'
+        ],
+        correct: 0
+    },
+    {
+        level: 'A1',
+        audioText: 'Der Zug kommt um acht Uhr an.',
+        options: [
+            '\u041f\u043e\u0435\u0437\u0434 \u043f\u0440\u0438\u0431\u044b\u0432\u0430\u0435\u0442 \u0432 \u0432\u043e\u0441\u0435\u043c\u044c \u0447\u0430\u0441\u043e\u0432.',
+            '\u041f\u043e\u0435\u0437\u0434 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0432 \u0432\u043e\u0441\u0435\u043c\u044c \u0447\u0430\u0441\u043e\u0432.',
+            '\u041f\u043e\u0435\u0437\u0434 \u043f\u0440\u0438\u0431\u044b\u0432\u0430\u0435\u0442 \u043d\u0430 \u0432\u043e\u0441\u044c\u043c\u043e\u0439 \u043f\u0443\u0442\u044c.',
+            '\u041d\u0430 \u043f\u043e\u0435\u0437\u0434 \u043d\u0443\u0436\u043d\u043e \u043f\u0435\u0440\u0435\u0441\u0435\u0441\u0442\u044c \u0432 \u0432\u043e\u0441\u0435\u043c\u044c \u0447\u0430\u0441\u043e\u0432.'
+        ],
+        correct: 0
+    },
+    {
+        level: 'A2',
+        audioText: 'Wir m\u00fcssen morgen fr\u00fch zum Arzt gehen.',
+        options: [
+            '\u0417\u0430\u0432\u0442\u0440\u0430 \u0440\u0430\u043d\u043e \u043c\u044b \u0434\u043e\u043b\u0436\u043d\u044b \u043f\u043e\u0439\u0442\u0438 \u043a \u0432\u0440\u0430\u0447\u0443.',
+            '\u0417\u0430\u0432\u0442\u0440\u0430 \u0440\u0430\u043d\u043e \u043c\u044b \u0445\u043e\u0442\u0438\u043c \u043f\u043e\u0439\u0442\u0438 \u043a \u0432\u0440\u0430\u0447\u0443.',
+            '\u0417\u0430\u0432\u0442\u0440\u0430 \u0440\u0430\u043d\u043e \u043c\u044b \u0434\u043e\u043b\u0436\u043d\u044b \u043f\u043e\u0439\u0442\u0438 \u0432 \u0430\u043f\u0442\u0435\u043a\u0443.',
+            '\u0417\u0430\u0432\u0442\u0440\u0430 \u0440\u0430\u043d\u043e \u043d\u0430\u043c \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u043e \u043f\u043e\u0439\u0442\u0438 \u043a \u0432\u0440\u0430\u0447\u0443.'
+        ],
+        correct: 0
+    },
+    {
+        level: 'A2',
+        audioText: 'Sie hat den Schl\u00fcssel auf dem Tisch gelassen.',
+        options: [
+            '\u041e\u043d\u0430 \u043e\u0441\u0442\u0430\u0432\u0438\u043b\u0430 \u043a\u043b\u044e\u0447 \u043d\u0430 \u0441\u0442\u043e\u043b\u0435.',
+            '\u041e\u043d\u0430 \u043f\u043e\u043b\u043e\u0436\u0438\u043b\u0430 \u043a\u043b\u044e\u0447 \u043d\u0430 \u0441\u0442\u0443\u043b.',
+            '\u041e\u043d\u0430 \u043e\u0441\u0442\u0430\u0432\u0438\u043b\u0430 \u043a\u043b\u044e\u0447 \u0432 \u0441\u0442\u043e\u043b\u0435.',
+            '\u041e\u043d\u0430 \u0437\u0430\u0431\u044b\u043b\u0430 \u0437\u0430\u043c\u043e\u043a \u043d\u0430 \u0441\u0442\u043e\u043b\u0435.'
+        ],
+        correct: 0
+    },
+    {
+        level: 'B1',
+        audioText: 'Obwohl es regnet, gehen die Kinder nach drau\u00dfen.',
+        options: [
+            '\u0425\u043e\u0442\u044f \u0438\u0434\u0435\u0442 \u0434\u043e\u0436\u0434\u044c, \u0434\u0435\u0442\u0438 \u0432\u044b\u0445\u043e\u0434\u044f\u0442 \u043d\u0430 \u0443\u043b\u0438\u0446\u0443.',
+            '\u041f\u043e\u043a\u0430 \u0438\u0434\u0435\u0442 \u0434\u043e\u0436\u0434\u044c, \u0434\u0435\u0442\u0438 \u0432\u044b\u0445\u043e\u0434\u044f\u0442 \u043d\u0430 \u0443\u043b\u0438\u0446\u0443.',
+            '\u041f\u043e\u0442\u043e\u043c\u0443 \u0447\u0442\u043e \u0438\u0434\u0435\u0442 \u0434\u043e\u0436\u0434\u044c, \u0434\u0435\u0442\u0438 \u0432\u044b\u0445\u043e\u0434\u044f\u0442 \u043d\u0430 \u0443\u043b\u0438\u0446\u0443.',
+            '\u0425\u043e\u0442\u044f \u0438\u0434\u0435\u0442 \u0434\u043e\u0436\u0434\u044c, \u0434\u0435\u0442\u0438 \u0438\u0434\u0443\u0442 \u0432\u043d\u0443\u0442\u0440\u044c.'
+        ],
+        correct: 0
+    },
+    {
+        level: 'B2',
+        audioText: 'Je l\u00e4nger wir warten, desto schwieriger wird die Entscheidung.',
+        options: [
+            '\u0427\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u043c\u044b \u0436\u0434\u0435\u043c, \u0442\u0435\u043c \u0442\u0440\u0443\u0434\u043d\u0435\u0435 \u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0440\u0435\u0448\u0435\u043d\u0438\u0435.',
+            '\u0427\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u043c\u044b \u0436\u0434\u0435\u043c, \u0442\u0435\u043c \u0442\u0440\u0443\u0434\u043d\u0435\u0435 \u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u043e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u0435.',
+            '\u0427\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u043c\u044b \u0441\u043e\u0432\u0435\u0442\u0443\u0435\u043c\u0441\u044f, \u0442\u0435\u043c \u0442\u0440\u0443\u0434\u043d\u0435\u0435 \u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0440\u0435\u0448\u0435\u043d\u0438\u0435.',
+            '\u0427\u0435\u043c \u0434\u043e\u043b\u044c\u0448\u0435 \u043c\u044b \u0436\u0434\u0435\u043c, \u0442\u0435\u043c \u043d\u0430\u0434\u0435\u0436\u043d\u0435\u0435 \u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0440\u0435\u0448\u0435\u043d\u0438\u0435.'
+        ],
+        correct: 0
+    }
+];
+
 function shuffle(items) {
     const copy = [...items];
     for (let i = copy.length - 1; i > 0; i--) {
@@ -335,12 +404,15 @@ function shuffle(items) {
 
 export class QuestionBank {
     constructor() {
+        this.mode = 'grammar';
         this.level = 'A2';
         this.lexicalTopic = LEXICAL_TOPICS[0];
         this.fallbackCursor = 0;
+        this.audioFallbackCursor = 0;
         this.grammarCursor = 0;
         this.selectedSlots = [];
         this.fallbackPool = shuffle(QUESTION_POOL);
+        this.audioFallbackPool = shuffle(AUDIO_QUESTION_POOL);
         this.questionPool = Object.create(null);
         this.fetching = Object.create(null);
         this.usedDisplays = Object.create(null);
@@ -348,6 +420,7 @@ export class QuestionBank {
     }
 
     configure(settings = {}) {
+        const nextMode = settings.questionMode === 'audio' ? 'audio' : 'grammar';
         const nextLevel = settings.langLevel || this.level;
         const nextLexicalTopic = settings.lexicalTopic || this.lexicalTopic;
         const nextSlots = (settings.grammarSlots || [])
@@ -358,12 +431,14 @@ export class QuestionBank {
                 isWortstellung: Boolean(slot.isWortstellung)
             }));
         const nextSignature = JSON.stringify({
+            mode: nextMode,
             level: nextLevel,
             lexicalTopic: nextLexicalTopic,
             slots: nextSlots
         });
         const samePoolConfig = nextSignature === this.poolSignature;
 
+        this.mode = nextMode;
         this.level = nextLevel;
         this.lexicalTopic = nextLexicalTopic;
         this.grammarCursor = 0;
@@ -372,11 +447,17 @@ export class QuestionBank {
 
         if (!samePoolConfig) {
             this.fallbackCursor = 0;
+            this.audioFallbackCursor = 0;
             this.fallbackPool = shuffle(QUESTION_POOL);
+            this.audioFallbackPool = shuffle(AUDIO_QUESTION_POOL);
         }
     }
 
     hasBridgePool(bridgeIndex) {
+        if (this.mode === 'audio') {
+            const pool = this.questionPool[this._audioKey()];
+            return Boolean(pool && pool.length > 0);
+        }
         const slot = this.slotForBridge(bridgeIndex);
         if (!slot) return false;
         const pool = this.questionPool[this._slotKey(slot)];
@@ -390,6 +471,8 @@ export class QuestionBank {
     }
 
     async nextQuestion(slotOverride = null) {
+        if (this.mode === 'audio') return this._nextAudioQuestion();
+
         const slot = slotOverride && slotOverride.grammarTopic ? slotOverride : this._nextGrammarSlot();
         try {
             const question = await this._getGeneratedQuestion(slot);
@@ -399,6 +482,17 @@ export class QuestionBank {
         }
 
         return this._fallbackQuestion(slot);
+    }
+
+    async _nextAudioQuestion() {
+        try {
+            const question = await this._getGeneratedAudioQuestion();
+            if (question) return question;
+        } catch (error) {
+            console.warn('AI audio question generation fallback:', error);
+        }
+
+        return this._fallbackAudioQuestion();
     }
 
     async _getGeneratedQuestion(slot) {
@@ -414,11 +508,24 @@ export class QuestionBank {
         return formatted;
     }
 
+    async _getGeneratedAudioQuestion() {
+        const key = this._audioKey();
+        const pool = await this._ensureAudioPool();
+        if (!pool || pool.length === 0) return null;
+
+        const raw = pool.shift();
+        const formatted = this._formatAudioQuestion(raw, true, key);
+        const used = this.usedDisplays[key] || new Set();
+        used.add(raw.audioText);
+        this.usedDisplays[key] = used;
+        return formatted;
+    }
+
     returnQuestion(question) {
         if (!question || !question.generated || !question._poolKey || !question._rawQuestion) return;
         const pool = this.questionPool[question._poolKey] || [];
-        const display = question._rawQuestion.display;
-        if (!pool.some((item) => item && item.display === display)) {
+        const display = question._rawQuestion.audioText || question._rawQuestion.display;
+        if (!pool.some((item) => item && (item.audioText || item.display) === display)) {
             pool.push(question._rawQuestion);
         }
         this.questionPool[question._poolKey] = pool;
@@ -441,6 +548,28 @@ export class QuestionBank {
         this.fetching[key] = this._fetchQuestions(slot)
             .catch((error) => {
                 console.warn(`Не удалось загрузить вопросы для темы ${slot.grammarTopic}:`, error);
+                return [];
+            })
+            .then((result) => {
+                delete this.fetching[key];
+                return result;
+            }, (error) => {
+                delete this.fetching[key];
+                throw error;
+            });
+
+        return this.fetching[key];
+    }
+
+    async _ensureAudioPool() {
+        const key = this._audioKey();
+        const pool = this.questionPool[key];
+        if (pool && pool.length > 0) return pool;
+        if (this.fetching[key]) return this.fetching[key];
+
+        this.fetching[key] = this._fetchAudioQuestions()
+            .catch((error) => {
+                console.warn('Failed to load audio questions:', error);
                 return [];
             })
             .then((result) => {
@@ -483,6 +612,31 @@ export class QuestionBank {
         return pool;
     }
 
+    async _fetchAudioQuestions() {
+        const key = this._audioKey();
+        const seen = Array.from(this.usedDisplays[key] || []).slice(-12);
+        const response = await fetch('/api/generate-audio-questions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                level: this.level,
+                lexicalTopic: this.lexicalTopic,
+                count: 10,
+                exclude: seen
+            })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        const valid = (data.questions || []).filter((question) => this._isValidAudioQuestion(question));
+        if (!valid.length) return [];
+
+        const pool = [...(this.questionPool[key] || []), ...shuffle(valid)];
+        this.questionPool[key] = pool;
+        return pool;
+    }
+
     _formatQuestion(rawQuestion, slot) {
         const correctAnswer = rawQuestion.options[rawQuestion.correct];
         const options = shuffle(rawQuestion.options);
@@ -498,6 +652,25 @@ export class QuestionBank {
             generated: true,
             _poolKey: this._slotKey(slot),
             _rawQuestion: rawQuestion
+        };
+    }
+
+    _formatAudioQuestion(rawQuestion, generated = false, poolKey = '') {
+        const correctAnswer = rawQuestion.options[rawQuestion.correct];
+        const options = shuffle(rawQuestion.options);
+
+        return {
+            level: rawQuestion.level || this.level,
+            topic: 'Audio',
+            text: '\u041f\u0440\u043e\u0441\u043b\u0443\u0448\u0430\u0439 \u043d\u0435\u043c\u0435\u0446\u043a\u0443\u044e \u0444\u0440\u0430\u0437\u0443 \u0438 \u0432\u044b\u0431\u0435\u0440\u0438 \u0442\u043e\u0447\u043d\u044b\u0439 \u043f\u0435\u0440\u0435\u0432\u043e\u0434.',
+            display: '\u041d\u0435\u043c\u0435\u0446\u043a\u0430\u044f \u0444\u0440\u0430\u0437\u0430 \u0437\u0432\u0443\u0447\u0438\u0442 \u0432\u0441\u043b\u0443\u0445.',
+            lexicalTopic: this.lexicalTopic,
+            audioText: rawQuestion.audioText,
+            options,
+            correctIndex: options.indexOf(correctAnswer),
+            generated,
+            _poolKey: generated ? poolKey : '',
+            _rawQuestion: generated ? rawQuestion : null
         };
     }
 
@@ -520,6 +693,15 @@ export class QuestionBank {
             correctIndex: options.indexOf(correctAnswer),
             generated: false
         };
+    }
+
+    _fallbackAudioQuestion() {
+        const maxRank = LEVEL_RANK[this.level] || LEVEL_RANK.A2;
+        const candidates = this.audioFallbackPool.filter((question) => LEVEL_RANK[question.level] <= maxRank);
+        const source = candidates.length ? candidates : this.audioFallbackPool;
+        const raw = source[this.audioFallbackCursor % source.length];
+        this.audioFallbackCursor += 1;
+        return this._formatAudioQuestion(raw);
     }
 
     _nextGrammarSlot() {
@@ -564,6 +746,10 @@ export class QuestionBank {
         return `${this.poolSignature}:${bridge}:${slot.grammarTopic}:${slot.isWortstellung ? 'w' : 'g'}`;
     }
 
+    _audioKey() {
+        return `${this.poolSignature}:audio:${this.level}:${this.lexicalTopic}`;
+    }
+
     _isValidQuestion(question) {
         return Boolean(
             question &&
@@ -575,6 +761,10 @@ export class QuestionBank {
             question.correct >= 0 &&
             question.correct <= 3
         );
+    }
+
+    _isValidAudioQuestion(question) {
+        return this._isValidQuestion(question) && typeof question.audioText === 'string' && question.audioText.length > 0;
     }
 }
 

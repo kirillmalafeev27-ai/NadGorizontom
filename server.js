@@ -3,6 +3,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { Readable } = require('node:stream');
 const zlib = require('node:zlib');
+const { handleAudioApi, isAudioApiPath } = require('./audio-api');
 const { handleGenerateQuestions } = require('./question-api');
 
 const DEFAULT_PORT = 3000;
@@ -940,6 +941,14 @@ function createServer(root = ROOT) {
       handleGenerateQuestions(req, res).catch((err) => {
         console.error('Question generation endpoint failed', err);
         sendText(res, 500, 'internal server error');
+      });
+      return;
+    }
+
+    if (isAudioApiPath((req.url || '').split('?')[0])) {
+      handleAudioApi(req, res).catch((err) => {
+        console.error('Audio endpoint failed', err);
+        sendJson(res, 500, { error: 'internal server error' });
       });
       return;
     }

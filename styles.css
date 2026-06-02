@@ -625,6 +625,7 @@ canvas#scene {
 }
 .level-buttons,
 .difficulty-buttons,
+.question-mode-buttons,
 .lexical-grid,
 .ritual-slots {
   display: grid;
@@ -640,6 +641,21 @@ canvas#scene {
 }
 .difficulty-buttons {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.question-mode-panel {
+  margin: 14px 0 18px;
+}
+.question-mode-title {
+  color: #91ffd8;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.question-mode-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.audio-mode-hint {
+  margin-top: 12px;
 }
 .lexical-grid {
   max-height: 310px;
@@ -659,6 +675,7 @@ canvas#scene {
 }
 .level-btn,
 .difficulty-btn,
+.question-mode-btn,
 .lexical-btn,
 .grammar-tag,
 .ritual-slot {
@@ -672,6 +689,7 @@ canvas#scene {
 }
 .level-btn:hover,
 .difficulty-btn:hover,
+.question-mode-btn:hover,
 .lexical-btn:hover,
 .grammar-tag:hover,
 .ritual-slot:hover {
@@ -680,6 +698,7 @@ canvas#scene {
 }
 .level-btn.selected,
 .difficulty-btn.selected,
+.question-mode-btn.selected,
 .lexical-btn.selected,
 .grammar-tag.selected-grammar,
 .ritual-slot.selected-slot {
@@ -688,7 +707,8 @@ canvas#scene {
   box-shadow: 0 0 20px rgba(112, 246, 255, 0.14);
 }
 .level-btn,
-.difficulty-btn {
+.difficulty-btn,
+.question-mode-btn {
   min-height: 92px;
   padding: 14px;
   display: flex;
@@ -705,6 +725,28 @@ canvas#scene {
 .level-desc {
   color: #9caec6;
   font-size: 12px;
+}
+#audio-repeat {
+  position: fixed;
+  right: 18px;
+  top: 88px;
+  z-index: 16;
+  display: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(145, 255, 216, 0.42);
+  border-radius: 50%;
+  background: rgba(8, 16, 18, 0.82);
+  color: #91ffd8;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+}
+#audio-repeat.on {
+  display: block;
+}
+#audio-repeat.loading {
+  opacity: 0.58;
 }
 .lexical-btn {
   min-height: 54px;
@@ -964,6 +1006,7 @@ canvas#scene {
   .setup-progress,
   .level-buttons,
   .difficulty-buttons,
+  .question-mode-buttons,
   .lexical-grid,
   .ritual-slots {
     grid-template-columns: 1fr;

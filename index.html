@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Glass Bridge - Nad Gorizontom</title>
-<link rel="stylesheet" href="styles.css?v=duel-visual-audio-1" />
+<link rel="stylesheet" href="styles.css?v=audio-mode-1" />
 <script type="importmap">
 {
   "imports": {
@@ -217,8 +217,17 @@ window.addEventListener('error', function (event) {
     <div id="setup-step4" class="setup-step hidden">
       <h2 class="step-title">Грамматика по колонкам</h2>
       <p class="step-hint">Выбери тему и нажми на одну из семи колонок поля. Каждая линия должна знать свой вопрос перед стартом.</p>
-      <div id="ritual-slots" class="ritual-slots"></div>
-      <div id="grammar-picker" class="grammar-picker"></div>
+      <div class="question-mode-panel">
+        <div class="question-mode-title">&#1058;&#1080;&#1087; &#1074;&#1086;&#1087;&#1088;&#1086;&#1089;&#1086;&#1074;</div>
+        <div id="question-mode-buttons" class="question-mode-buttons"></div>
+        <p id="audio-mode-hint" class="step-hint audio-mode-hint hidden">
+          &#1053;&#1072; &#1082;&#1072;&#1078;&#1076;&#1086;&#1084; &#1096;&#1072;&#1075;&#1077; &#1087;&#1088;&#1086;&#1079;&#1074;&#1091;&#1095;&#1080;&#1090; &#1085;&#1077;&#1084;&#1077;&#1094;&#1082;&#1072;&#1103; &#1092;&#1088;&#1072;&#1079;&#1072;. &#1042;&#1099;&#1073;&#1077;&#1088;&#1080; &#1090;&#1086;&#1095;&#1085;&#1099;&#1081; &#1087;&#1077;&#1088;&#1077;&#1074;&#1086;&#1076;.
+        </p>
+      </div>
+      <div id="grammar-setup">
+        <div id="ritual-slots" class="ritual-slots"></div>
+        <div id="grammar-picker" class="grammar-picker"></div>
+      </div>
       <div class="menu-actions">
         <button id="start-btn" type="button" disabled>Начать путь</button>
         <button id="back-to-step3" class="btn-secondary" type="button">Назад</button>
@@ -239,6 +248,6 @@ window.addEventListener('error', function (event) {
   </div>
 </div>
 
-<script type="module" src="main.js?v=duel-motion-room-1"></script>
+<script type="module" src="main.js?v=audio-mode-1"></script>
 </body>
 </html>
